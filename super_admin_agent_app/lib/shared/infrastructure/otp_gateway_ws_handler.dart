@@ -1,4 +1,5 @@
 import 'package:get_it/get_it.dart';
+import 'package:super_admin_agent/domain/otp_gateway/repositories/otp_gateway_repository.dart';
 
 import '../../presentation/otp_gateway/cubit/otp_dispatch_cubit.dart';
 import 'ws_message_router.dart';
@@ -18,7 +19,13 @@ class OtpGatewayWsHandler implements CapabilityCommandHandler {
   Future<void> handle({
     required String commandId,
     required String systemId,
+    Map<String, dynamic>? payload,
   }) async {
+    final messageBody = payload?['message_body'] as String?;
+    if (messageBody != null && messageBody.isNotEmpty) {
+      _getIt<OtpGatewayRepository>().cacheMessageBody(commandId, messageBody);
+    }
+
     final cubit = _getIt<OtpDispatchCubit>();
     await cubit.handleCommand(
       commandId: commandId,

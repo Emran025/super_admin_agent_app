@@ -26,11 +26,14 @@ class OtpDispatchCommand extends Equatable {
     this.status = DispatchStatus.pending,
   }) : assert(messageBody != '', 'messageBody must not be empty (SC-8)');
 
-  OtpDispatchCommand copyWith({DispatchStatus? status}) => OtpDispatchCommand(
+  OtpDispatchCommand copyWith({
+    DispatchStatus? status,
+    String? messageBody,
+  }) => OtpDispatchCommand(
         commandId: commandId,
         systemId: systemId,
         recipientPhoneNumber: recipientPhoneNumber,
-        messageBody: messageBody,
+        messageBody: messageBody ?? this.messageBody,
         issuedAt: issuedAt,
         simSlot: simSlot,
         status: status ?? this.status,

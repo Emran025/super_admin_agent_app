@@ -27,7 +27,11 @@ abstract class CapabilityId {
 /// The router NEVER passes the raw WebSocket message map to the handler —
 /// only the extracted, validated identifiers.
 abstract class CapabilityCommandHandler {
-  Future<void> handle({required String commandId, required String systemId});
+  Future<void> handle({
+    required String commandId,
+    required String systemId,
+    Map<String, dynamic>? payload,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +122,11 @@ class WsMessageRouter {
     }
 
     // All checks passed — dispatch to the handler.
-    await handler.handle(commandId: commandId, systemId: systemId);
+    await handler.handle(
+      commandId: commandId,
+      systemId: systemId,
+      payload: data,
+    );
   }
 
   Future<void> _rejectAndLog({

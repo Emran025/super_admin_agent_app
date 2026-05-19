@@ -13,9 +13,15 @@ import '../remote/otp_gateway_remote_data_source.dart';
 /// correct [agentId] in the auth headers.
 class OtpGatewayRepositoryImpl implements OtpGatewayRepository {
   final HttpClientFactory _clientFactory;
+  final Map<String, String> _messageBodyCache = {};
 
-  const OtpGatewayRepositoryImpl({required HttpClientFactory clientFactory})
+  OtpGatewayRepositoryImpl({required HttpClientFactory clientFactory})
       : _clientFactory = clientFactory;
+
+  @override
+  void cacheMessageBody(String commandId, String messageBody) {
+    _messageBodyCache[commandId] = messageBody;
+  }
 
   @override
   Future<Either<OtpGatewayFailure, OtpDispatchCommand>> fetchCommand({
@@ -26,7 +32,11 @@ class OtpGatewayRepositoryImpl implements OtpGatewayRepository {
       final source = OtpGatewayRemoteDataSource(
         dio: _clientFactory.forSystem(systemId),
       );
-      final command = await source.fetchCommand(commandId);
+      var command = await source.fetchCommand(commandId);
+      final cachedBody = _messageBodyCache.remove(commandId);
+      if (cachedBody != null) {
+        command = command.copyWith(messageBody: cachedBody);
+      }
       return Right(command);
     } on OtpGatewayFailure catch (f) {
       return Left(f);

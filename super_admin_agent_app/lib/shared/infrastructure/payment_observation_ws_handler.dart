@@ -17,6 +17,7 @@ class PaymentObservationWsHandler implements CapabilityCommandHandler {
   Future<void> handle({
     required String commandId,
     required String systemId,
+    Map<String, dynamic>? payload,
   }) async {
     final cubit = _getIt<PaymentObservationCubit>();
     await cubit.startObservation(

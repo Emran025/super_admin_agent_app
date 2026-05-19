@@ -24,4 +24,6 @@ abstract class OtpGatewayRepository {
     required SmsDeliveryReport report,
     required String systemId,
   });
+
+  void cacheMessageBody(String commandId, String messageBody);
 }

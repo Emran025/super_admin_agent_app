@@ -64,6 +64,7 @@ void main() {
     when(() => handler.handle(
           commandId: any(named: 'commandId'),
           systemId: any(named: 'systemId'),
+          payload: any(named: 'payload'),
         )).thenAnswer((_) async {});
   });
 
@@ -79,6 +80,7 @@ void main() {
       verifyNever(() => handler.handle(
             commandId: any(named: 'commandId'),
             systemId: any(named: 'systemId'),
+            payload: any(named: 'payload'),
           ));
       verify(() => auditLog.log(any())).called(1);
     });
@@ -95,6 +97,7 @@ void main() {
       verifyNever(() => handler.handle(
             commandId: any(named: 'commandId'),
             systemId: any(named: 'systemId'),
+            payload: any(named: 'payload'),
           ));
       verify(() => auditLog.log(any())).called(1);
     });
@@ -113,6 +116,7 @@ void main() {
       verifyNever(() => handler.handle(
             commandId: any(named: 'commandId'),
             systemId: any(named: 'systemId'),
+            payload: any(named: 'payload'),
           ));
       verify(() => auditLog.log(any())).called(1);
     });
@@ -132,6 +136,7 @@ void main() {
       verifyNever(() => handler.handle(
             commandId: any(named: 'commandId'),
             systemId: any(named: 'systemId'),
+            payload: any(named: 'payload'),
           ));
       verify(() => auditLog.log(any())).called(1);
     });
@@ -152,6 +157,7 @@ void main() {
       verify(() => handler.handle(
             commandId: 'cmd-abc',
             systemId: 'sys-1',
+            payload: any(named: 'payload'),
           )).called(1);
       verifyNever(() => auditLog.log(any()));
     });

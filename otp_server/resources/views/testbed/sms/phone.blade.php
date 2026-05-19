@@ -362,7 +362,11 @@
                 Phone Number <span class="required-star">*</span>
             </label>
             <div class="phone-wrap">
-                <span class="phone-prefix">📱</span>
+                <span class="phone-prefix" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h2.5a1 1 0 011 1c0 1.24.2 2.45.57 3.57a1 1 0 01-.24 1.01l-2.21 2.21z" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </span>
                 <input
                     type="tel"
                     id="phone_number"
@@ -383,7 +387,13 @@
     </form>
 
     <div class="vcard-note">
-        <div class="vcard-icon">🪪</div>
+        <div class="vcard-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <circle cx="8" cy="10" r="2" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <path d="M14 8h4M14 12h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+            </svg>
+        </div>
         <p>
             <strong>Auto-save contact:</strong> The SMS will include your name and
             number as a vCard. Tap <em>"Save contact"</em> in your SMS app to store
