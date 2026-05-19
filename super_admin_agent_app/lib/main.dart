@@ -30,19 +30,21 @@ Future<void> main() async {
   // 1. Flutter engine must be initialized before any plugin is used.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Initialise the Android Foreground Service.
+  // 2. Request runtime permissions.
+  //    This must happen before starting the foreground service so that notification
+  //    permissions (required on Android 13+) are requested/granted first.
+  await const PermissionHandlerService().requestAll();
+
+  // 3. Initialise the Android Foreground Service.
   //    This keeps the process alive through Doze mode, ensuring the WebSocket
   //    connection is never killed by the OS in the background.
   await AgentForegroundService.init();
 
-  // 3. Initialize the append-only audit log database.
+  // 4. Initialize the append-only audit log database.
   await SqliteAuditLogService.init();
 
-  // 4. Wire all services into the DI container.
+  // 5. Wire all services into the DI container.
   await setupDependencies();
-
-  // 5. Request runtime permissions.
-  await const PermissionHandlerService().requestAll();
 
   // 6. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();

@@ -13,6 +13,7 @@ class PermissionHandlerService {
       Permission.sms,
       Permission.phone,
       Permission.camera, // For pairing QR scan
+      Permission.notification,
     ].request();
 
     return statuses.map((key, value) => MapEntry(key, value.isGranted));
