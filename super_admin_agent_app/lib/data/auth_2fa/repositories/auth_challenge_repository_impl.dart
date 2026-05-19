@@ -1,14 +1,21 @@
 import 'package:dartz/dartz.dart';
+
 import '../../../domain/auth_2fa/entities/auth_challenge.dart';
 import '../../../domain/auth_2fa/repositories/auth_challenge_repository.dart';
 import '../../../domain/auth_2fa/value_objects/signed_challenge_response.dart';
+import '../../../shared/data/http_client_factory.dart';
 import '../remote/auth_challenge_remote_data_source.dart';
 
+/// Implements [AuthChallengeRepository].
+///
+/// Creates a system-specific [AuthChallengeRemoteDataSource] per call using
+/// [HttpClientFactory.forSystem()]. This ensures each request carries the
+/// correct [agentId] and signature for the right system.
 class AuthChallengeRepositoryImpl implements AuthChallengeRepository {
-  final AuthChallengeRemoteDataSource _remote;
+  final HttpClientFactory _clientFactory;
 
-  const AuthChallengeRepositoryImpl({required AuthChallengeRemoteDataSource remote})
-      : _remote = remote;
+  const AuthChallengeRepositoryImpl({required HttpClientFactory clientFactory})
+      : _clientFactory = clientFactory;
 
   @override
   Future<Either<AuthChallengeFailure, AuthChallenge>> fetchChallenge({
@@ -16,7 +23,10 @@ class AuthChallengeRepositoryImpl implements AuthChallengeRepository {
     required String systemId,
   }) async {
     try {
-      final challenge = await _remote.fetchChallenge(challengeId);
+      final source = AuthChallengeRemoteDataSource(
+        dio: _clientFactory.forSystem(systemId),
+      );
+      final challenge = await source.fetchChallenge(challengeId);
       return Right(challenge);
     } on AuthChallengeFailure catch (f) {
       return Left(f);
@@ -31,7 +41,10 @@ class AuthChallengeRepositoryImpl implements AuthChallengeRepository {
     required String systemId,
   }) async {
     try {
-      await _remote.submitResponse(response);
+      final source = AuthChallengeRemoteDataSource(
+        dio: _clientFactory.forSystem(systemId),
+      );
+      await source.submitResponse(response);
       return const Right(null);
     } on AuthChallengeFailure catch (f) {
       return Left(f);
