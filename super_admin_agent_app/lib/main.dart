@@ -14,6 +14,7 @@ import 'shared/infrastructure/auth_2fa_fcm_handler.dart';
 import 'shared/infrastructure/fcm_message_router.dart';
 import 'shared/infrastructure/otp_gateway_fcm_handler.dart';
 import 'shared/infrastructure/payment_observation_fcm_handler.dart';
+import 'shared/infrastructure/permission_handler_service.dart';
 
 // ---------------------------------------------------------------------------
 // Global navigator key
@@ -60,6 +61,9 @@ Future<void> main() async {
 
   // 5. Wire all services into the DI container.
   await setupDependencies();
+
+  // 5.5. Request runtime permissions (Phase 7).
+  await const PermissionHandlerService().requestAll();
 
   // 6. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();
