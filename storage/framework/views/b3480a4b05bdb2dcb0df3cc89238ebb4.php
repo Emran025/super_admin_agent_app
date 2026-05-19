@@ -179,20 +179,20 @@
             <p>A one-time code was dispatched to your registered device via the Super Admin Agent.</p>
         </div>
 
-        @if ($errors->any())
+        <?php if($errors->any()): ?>
             <ul class="error-list">
-                @foreach ($errors->all() as $error)
-                    <li>{{ $error }}</li>
-                @endforeach
+                <?php $__currentLoopData = $errors->all(); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $error): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
+                    <li><?php echo e($error); ?></li>
+                <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
             </ul>
-        @endif
+        <?php endif; ?>
 
-        @if (session('success'))
-            <div class="success-msg">{{ session('success') }}</div>
-        @endif
+        <?php if(session('success')): ?>
+            <div class="success-msg"><?php echo e(session('success')); ?></div>
+        <?php endif; ?>
 
-        <form method="POST" action="{{ route('otp.verify') }}">
-            @csrf
+        <form method="POST" action="<?php echo e(route('otp.verify')); ?>">
+            <?php echo csrf_field(); ?>
 
             <div class="form-group">
                 <label for="otp">6-Digit Code</label>
@@ -207,7 +207,7 @@
                     autofocus
                     required
                     placeholder="000000"
-                    value="{{ old('otp') }}"
+                    value="<?php echo e(old('otp')); ?>"
                 >
             </div>
 
@@ -227,3 +227,4 @@
     </div>
 </body>
 </html>
+<?php /**PATH /home/runner/workspace/otp_server/resources/views/auth/verify-otp.blade.php ENDPATH**/ ?>
