@@ -1,12 +1,31 @@
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
 
+import '../data/auth_2fa/repositories/auth_challenge_repository_impl.dart';
+import '../data/otp_gateway/repositories/otp_gateway_repository_impl.dart';
 import '../data/pairing/repositories/pairing_repository_impl.dart';
+import '../data/payment_observation/repositories/payment_observation_repository_impl.dart';
+import '../domain/auth_2fa/repositories/auth_challenge_repository.dart';
+import '../domain/auth_2fa/use_cases/receive_auth_challenge_use_case.dart';
+import '../domain/auth_2fa/use_cases/record_user_decision_use_case.dart';
+import '../domain/auth_2fa/use_cases/submit_challenge_response_use_case.dart';
+import '../domain/otp_gateway/repositories/otp_gateway_repository.dart';
+import '../domain/otp_gateway/use_cases/execute_sms_dispatch_use_case.dart';
+import '../domain/otp_gateway/use_cases/receive_dispatch_command_use_case.dart';
+import '../domain/otp_gateway/use_cases/report_delivery_status_use_case.dart';
 import '../domain/pairing/repositories/pairing_repository.dart';
 import '../domain/pairing/use_cases/complete_pairing_use_case.dart';
 import '../domain/pairing/use_cases/scan_pairing_token_use_case.dart';
 import '../domain/pairing/use_cases/unpair_system_use_case.dart';
+import '../domain/payment_observation/repositories/payment_observation_repository.dart';
+import '../domain/payment_observation/use_cases/match_observation_to_intent_use_case.dart';
+import '../domain/payment_observation/use_cases/process_incoming_sms_use_case.dart';
+import '../domain/payment_observation/use_cases/register_observation_session_use_case.dart';
+import '../domain/payment_observation/use_cases/report_observation_use_case.dart';
+import '../presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
+import '../presentation/otp_gateway/cubit/otp_dispatch_cubit.dart';
 import '../presentation/pairing/cubit/pairing_cubit.dart';
+import '../presentation/payment_observation/cubit/payment_observation_cubit.dart';
 import '../shared/data/canonical_json.dart';
 import '../shared/data/crypto_nonce_generator.dart';
 import '../shared/data/http_client_factory.dart';
@@ -20,8 +39,10 @@ import '../shared/domain/secure_storage_service.dart';
 import '../shared/domain/signing_service.dart';
 import '../shared/domain/sms_parsing_service.dart';
 import '../shared/infrastructure/android_keystore_signing_service.dart';
+import '../shared/infrastructure/android_sms_sender_service.dart';
 import '../shared/infrastructure/fcm_message_router.dart';
 import '../shared/infrastructure/regex_sms_parsing_service.dart';
+import '../shared/infrastructure/sms_receiver_service.dart';
 
 final GetIt getIt = GetIt.instance;
 
@@ -30,10 +51,8 @@ final GetIt getIt = GetIt.instance;
 /// Registration order matters — dependencies must be registered before
 /// their dependents. Called once from [main()] after Firebase and
 /// [SqliteAuditLogService] are initialized.
-///
-/// Capability modules are stubbed with TODO markers; Phases 4–6 fill them in.
 Future<void> setupDependencies() async {
-  // 1. Secure storage — everything that needs secrets depends on this.
+  // 1. Secure storage — foundation for all secrets.
   getIt.registerLazySingleton<SecureStorageService>(
     () => SecureStorageServiceImpl(),
   );
@@ -45,37 +64,37 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 3. Nonce generator — stateless, const instance.
+  // 3. Nonce generator — stateless, const.
   getIt.registerLazySingleton<NonceGenerator>(
     () => const CryptoNonceGenerator(),
   );
 
-  // 4. Audit log service — singleton, already initialized.
+  // 4. Audit log service — singleton, already initialized via SqliteAuditLogService.init().
   getIt.registerLazySingleton<AuditLogService>(
     () => SqliteAuditLogService.instance,
   );
 
-  // 5. SMS parsing service — stateless, const instance.
+  // 5. SMS parsing service — stateless, const.
   getIt.registerLazySingleton<SmsParsingService>(
     () => const RegexSmsParsingService(),
   );
 
-  // 6. Pairing repository — uses plain unauthenticated Dio (intentional).
+  // 6. Pairing repository — plain unauthenticated Dio (only acceptable raw Dio usage).
   getIt.registerLazySingleton<PairingRepository>(
     () => PairingRepositoryImpl(
       secureStorage: getIt<SecureStorageService>(),
-      dio: Dio(), // Unauthenticated — only for pairing ceremony.
+      dio: Dio(), // Unauthenticated — only for pairing ceremony. Justified in spec §4.
     ),
   );
 
-  // 7. Paired system registry — loads from storage on reload().
+  // 7. Paired system registry — in-memory singleton, reloaded at startup.
   getIt.registerLazySingleton<PairedSystemRegistry>(
     () => PairedSystemRegistryImpl(
       pairingRepository: getIt<PairingRepository>(),
     ),
   );
 
-  // 8. HTTP client factory — authenticated Dio instances only.
+  // 8. HTTP client factory — authenticated Dio per system, the only signing path.
   getIt.registerLazySingleton<HttpClientFactory>(
     () => HttpClientFactory(
       signingService: getIt<SigningService>(),
@@ -84,7 +103,7 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 9. FCM message router — all capability handlers register themselves here.
+  // 9. FCM message router — all capability handlers register here.
   getIt.registerLazySingleton<FcmMessageRouter>(
     () => FcmMessageRouter(
       registry: getIt<PairedSystemRegistry>(),
@@ -118,9 +137,108 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // TODO(phase-4): Register 2FA module bindings.
-  // TODO(phase-5): Register OTP Gateway module bindings.
-  // TODO(phase-6): Register Payment Observation module bindings.
+  // 11. Phase 4 — 2FA capability bindings.
+  getIt.registerLazySingleton<AuthChallengeRepository>(
+    () => AuthChallengeRepositoryImpl(
+      clientFactory: getIt<HttpClientFactory>(),
+    ),
+  );
+  getIt.registerLazySingleton<ReceiveAuthChallengeUseCase>(
+    () => ReceiveAuthChallengeUseCase(
+      repository: getIt<AuthChallengeRepository>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerLazySingleton<RecordUserDecisionUseCase>(
+    () => RecordUserDecisionUseCase(
+      signingService: getIt<SigningService>(),
+      nonceGenerator: getIt<NonceGenerator>(),
+    ),
+  );
+  getIt.registerLazySingleton<SubmitChallengeResponseUseCase>(
+    () => SubmitChallengeResponseUseCase(
+      repository: getIt<AuthChallengeRepository>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerFactory<AuthChallengeCubit>(
+    () => AuthChallengeCubit(
+      receiveUseCase: getIt<ReceiveAuthChallengeUseCase>(),
+      recordUseCase: getIt<RecordUserDecisionUseCase>(),
+      submitUseCase: getIt<SubmitChallengeResponseUseCase>(),
+    ),
+  );
+
+  // 12. Phase 5 — OTP Gateway capability bindings.
+  getIt.registerLazySingleton<OtpGatewayRepository>(
+    () => OtpGatewayRepositoryImpl(
+      clientFactory: getIt<HttpClientFactory>(),
+    ),
+  );
+  getIt.registerLazySingleton<ReceiveDispatchCommandUseCase>(
+    () => ReceiveDispatchCommandUseCase(
+      repository: getIt<OtpGatewayRepository>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerLazySingleton<ExecuteSmsDispatchUseCase>(
+    () => ExecuteSmsDispatchUseCase(
+      smsSenderService: const AndroidSmsSenderService(),
+      signingService: getIt<SigningService>(),
+      nonceGenerator: getIt<NonceGenerator>(),
+    ),
+  );
+  getIt.registerLazySingleton<ReportDeliveryStatusUseCase>(
+    () => ReportDeliveryStatusUseCase(
+      repository: getIt<OtpGatewayRepository>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerFactory<OtpDispatchCubit>(
+    () => OtpDispatchCubit(
+      receiveUseCase: getIt<ReceiveDispatchCommandUseCase>(),
+      executeUseCase: getIt<ExecuteSmsDispatchUseCase>(),
+      reportUseCase: getIt<ReportDeliveryStatusUseCase>(),
+    ),
+  );
+
+  // 13. Phase 6 — Payment Observation capability bindings.
+  getIt.registerLazySingleton<PaymentObservationRepository>(
+    () => PaymentObservationRepositoryImpl(
+      clientFactory: getIt<HttpClientFactory>(),
+    ),
+  );
+  getIt.registerLazySingleton<RegisterObservationSessionUseCase>(
+    () => RegisterObservationSessionUseCase(
+      repository: getIt<PaymentObservationRepository>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerLazySingleton<ProcessIncomingSmsUseCase>(
+    () => ProcessIncomingSmsUseCase(
+      parsingService: getIt<SmsParsingService>(),
+    ),
+  );
+  getIt.registerLazySingleton<MatchObservationToIntentUseCase>(
+    () => const MatchObservationToIntentUseCase(),
+  );
+  getIt.registerLazySingleton<ReportObservationUseCase>(
+    () => ReportObservationUseCase(
+      repository: getIt<PaymentObservationRepository>(),
+      signingService: getIt<SigningService>(),
+      nonceGenerator: getIt<NonceGenerator>(),
+      auditLogService: getIt<AuditLogService>(),
+    ),
+  );
+  getIt.registerFactory<PaymentObservationCubit>(
+    () => PaymentObservationCubit(
+      registerUseCase: getIt<RegisterObservationSessionUseCase>(),
+      processUseCase: getIt<ProcessIncomingSmsUseCase>(),
+      matchUseCase: getIt<MatchObservationToIntentUseCase>(),
+      reportUseCase: getIt<ReportObservationUseCase>(),
+      smsReceiver: SmsReceiverService.instance,
+    ),
+  );
 }
 
 // Suppress unused import warning — CanonicalJson is a shared utility
