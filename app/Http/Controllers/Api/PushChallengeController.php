@@ -92,6 +92,8 @@ class PushChallengeController extends Controller
             return response()->json(['error' => 'Invalid signature.'], 403);
         }
 
+        $agent->update(['last_seen_at' => now()]);
+
         // --- 4. Load and validate the challenge ---
         $challenge = TwoFactorChallenge::find($challengeId);
         if (!$challenge) {

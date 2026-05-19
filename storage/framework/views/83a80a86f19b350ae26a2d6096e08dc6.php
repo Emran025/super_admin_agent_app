@@ -194,6 +194,14 @@
             text-align: center;
             line-height: 1.6;
         }
+
+        .card-icon.purple { background: #1e0a3c; border: 1px solid #7c3aed; }
+        .card-badge.purple { background: #1e0a3c; color: #c4b5fd; border: 1px solid #7c3aed; }
+        .btn.purple { background: #7c3aed; color: #fff; }
+        .btn.purple:hover { filter: brightness(1.1); }
+
+        .cards-wide { max-width: 820px; width: 100%; margin-top: 1.5rem; }
+        .card-full { width: 100%; }
     </style>
 </head>
 <body>
@@ -288,8 +296,47 @@
 
     </div>
 
+    
+    <div class="cards-wide">
+        <div class="card card-full">
+            <div>
+                <div class="card-icon purple">🔗</div>
+            </div>
+            <div>
+                <span class="card-badge purple">external_gateway</span>
+            </div>
+            <h2>System Pairing</h2>
+            <p>
+                Register a test external system and obtain its AES-256-GCM encryption key
+                and API bearer token. The testbed SMS and 2FA flows use this system to
+                exercise the full zero-trust encrypted API gateway end-to-end.
+            </p>
+
+            <div class="divider">Flow</div>
+
+            <ul class="steps">
+                <li>
+                    <span class="step-num">1</span>
+                    Create a test external system with selected capabilities
+                </li>
+                <li>
+                    <span class="step-num">2</span>
+                    Receive the API token &amp; AES-256 key (shown once, QR available)
+                </li>
+                <li>
+                    <span class="step-num">3</span>
+                    SMS Gateway and 2FA testbeds encrypt their payloads using this key
+                </li>
+            </ul>
+
+            <a href="<?php echo e(route('testbed.pairing')); ?>" class="btn purple">
+                Manage External Systems &rarr;
+            </a>
+        </div>
+    </div>
+
     <p class="footer-note">
-        Zero-trust &bull; ECDSA P-256 signed &bull; Self-hosted Reverb WebSocket &bull; No FCM
+        Zero-trust &bull; AES-256-GCM payload encryption &bull; ECDSA P-256 signed &bull; Self-hosted Reverb WebSocket &bull; No FCM
     </p>
 
 </body>

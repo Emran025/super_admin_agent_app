@@ -27,14 +27,22 @@ class TwoFactorChallenge extends Model
     protected $fillable = [
         'agent_id',
         'system_id',
+        'external_system_id',
         'challenged_username',
         'status',
         'expires_at',
+        'sandbox_log',
     ];
 
     protected $casts = [
-        'expires_at' => 'datetime',
+        'expires_at'  => 'datetime',
+        'sandbox_log' => 'boolean',
     ];
+
+    public function externalSystem(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ExternalSystem::class);
+    }
 
     public function isPending(): bool
     {
