@@ -1,0 +1,18 @@
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Project specific
+super_admin_agent_app/build/
+super_admin_agent_app/.dart_tool/
+super_admin_agent_app/.flutter-plugins
+super_admin_agent_app/.flutter-plugins-dependencies
+super_admin_agent_app/.pub-cache/
+super_admin_agent_app/.pub/
+super_admin_agent_app/coverage/
+super_admin_agent_app/lib/generated_plugin_registrant.dart
