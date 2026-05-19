@@ -30,6 +30,7 @@ Each file in this artifact set (`Phase 0` through `Phase 10`) is a **complete, s
 | **Phase 7** | App assembly + hardening | Routing, dashboard, DI wiring, stop-condition enforcement, security checklist |
 | **Phase 8** | Laravel OTP testbed server | Webhook verification, Reverb WebSocket broadcast, database scaffolding |
 | **Phase 10** | Laravel testing & CI/CD | Model factories, security pipeline, replay attack prevention |
+| **Phase 11** | External Systems API Gateway | External system registry, token authorization, AES-256-GCM payload encryption |
 
 ---
 

@@ -134,6 +134,33 @@ jobs:
             || (echo "FAIL: P-256 SPKI header constant is missing or incorrect." && exit 1)
           echo "PASS: P-256 SPKI header constant is correct."
 
+      # -----------------------------------------------------------------------
+      # 10. Security gate — No plaintext encryption keys in migrations or config
+      #
+      #    Ensures encryption keys are stored encrypted at rest.
+      # -----------------------------------------------------------------------
+      - name: Security gate — no plaintext encryption keys in migrations
+        run: |
+          echo "Checking for raw encryption key storage columns..."
+          ! grep -rn "encryption_key_raw\|raw_encryption_key" \
+            database/migrations/ \
+            || (echo "FAIL: Plaintext encryption key columns detected." && exit 1)
+          echo "PASS: No plaintext encryption key columns found."
+
+      # -----------------------------------------------------------------------
+      # 11. Security gate — External system middleware uses GCM encryption
+      # -----------------------------------------------------------------------
+      - name: Security gate — External system middleware uses AES-256-GCM
+        run: |
+          echo "Checking external system middleware for AES-256-GCM..."
+          if [ -f app/Http/Middleware/VerifyExternalSystem.php ]; then
+            grep -q -i "aes-256-gcm" app/Http/Middleware/VerifyExternalSystem.php \
+              || (echo "FAIL: VerifyExternalSystem middleware must specify aes-256-gcm." && exit 1)
+            echo "PASS: VerifyExternalSystem uses AES-256-GCM."
+          else
+            echo "VerifyExternalSystem middleware not yet created. Skipping check."
+          fi
+
   client_test:
     name: Flutter Tests
     runs-on: ubuntu-latest
