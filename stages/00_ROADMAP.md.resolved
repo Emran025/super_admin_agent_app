@@ -1,0 +1,58 @@
+# Phased AI Implementation Prompts — Roadmap Overview
+
+## Purpose
+
+Each file in this artifact set (`Phase 0` through `Phase 7`) is a **complete, self-contained prompt** ready to be copy-pasted into an engineering AI. Execute them **strictly in order**. Do not begin a phase until all verification steps of the previous phase pass.
+
+---
+
+## Execution Rules
+
+1. **One phase at a time.** Never skip ahead.
+2. **Compile before you move.** Each phase ends with `flutter analyze` + unit tests. Both must pass zero errors/warnings.
+3. **No UI polish.** Presentation layer phases are functional, not cosmetic.
+4. **Scope discipline.** The engineering AI must build only what the current phase requests.
+5. **TODO markers.** Incomplete wiring carries `// TODO(phase-N):` so future phases can locate it.
+
+---
+
+## Phase Roadmap
+
+| Phase | Scope | Key Deliverables |
+|---|---|---|
+| **Phase 0** | Flutter scaffold + pubspec | Compilable empty project, all dependencies locked |
+| **Phase 1** | Cryptographic infrastructure | Keystore signing, flutter_secure_storage wrapper, nonce generator |
+| **Phase 2** | Pairing domain + registry | QR parse, key generation, server registration, PairedSystemRegistry |
+| **Phase 3** | Shared infrastructure | HTTP client factory, audit log service, FCM message router skeleton |
+| **Phase 4** | Push-Based 2FA capability | Full Domain → Data → Presentation for 2FA |
+| **Phase 5** | SMS OTP Gateway capability | Full Domain → Data → Presentation for OTP |
+| **Phase 6** | Payment Observation capability | Full Domain → Data → Presentation for Payment |
+| **Phase 7** | App assembly + hardening | Routing, dashboard, DI wiring, stop-condition enforcement, security checklist |
+
+---
+
+## Constitutional Axioms All Phases Must Enforce
+
+- **Axiom 1**: Mobile is executor, not decision-maker
+- **Axiom 5**: No plaintext secrets
+- **Axiom 6**: All server responses signed
+- **Axiom 7**: No Flutter/Firebase in Domain layer (AF-01)
+- **Axiom 8**: Every action is logged
+- **Axiom 9**: No hardcoded system references
+- **Axiom 10**: Uncertainty stops execution
+
+---
+
+## Failure Codes Reference
+
+| Code | Meaning |
+|---|---|
+| CF-01 | Plaintext secret storage |
+| CF-02 | Unsigned server response |
+| CF-03 | Communication with unpaired system |
+| CF-04 | App makes a business decision |
+| CF-05 | Capability used without server command |
+| AF-01 | Flutter import in Domain layer |
+| AF-02 | Cross-domain business logic dependency |
+| AF-03 | Business rule in Presentation layer |
+| AF-04 | Repository implementation in Domain layer |

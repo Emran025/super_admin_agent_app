@@ -1,0 +1,195 @@
+# Phase 6 — Payment Observation Capability
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 5 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+When an end-user initiates a bank transfer on a payment platform, the platform's backend wants to verify that the money actually arrived before releasing goods or services. One way to do this is to observe the bank's SMS confirmation on a dedicated device registered as a super admin.
+
+This capability turns the device into a payment observation terminal: the server opens an "observation session" for a specific expected payment, the device listens for an SMS from the expected bank sender, parses the SMS using a server-provided template, compares the extracted data to the expected values, and reports the observation back to the server. The server decides whether the payment is confirmed.
+
+The device never confirms a payment. It observes and reports. That distinction is the entire architectural foundation of this capability.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: The Raw SMS Body Is Never Retained (Invariant 1)
+The raw SMS body arrives in a `RawSmsEvent` object. `ProcessIncomingSmsUseCase.execute()` passes `event.body` directly to `SmsParsingService.parse()`. After that call, `event.body` is never referenced again — the `RawSmsEvent` object goes out of scope and is garbage collected.
+
+What persists: a `BankSmsObservation` entity with the parsed fields only (`parsedPayerName`, `parsedAmount`, `parsedCurrency`).
+
+**Why**: The raw SMS from a bank may contain account numbers, partial card numbers, branch codes, or other sensitive financial data beyond what the parsing template extracts. Retaining raw SMS content is a data minimization violation. Only the extracted, purpose-specific fields are permitted to persist.
+
+Structural enforcement: `BankSmsObservation` has no `rawBody` field. `ObservationReport` has no `rawBody` field. `OtpDispatchState` (the cubit states) have no raw body field. The audit schema has no raw content field. You cannot put raw content in these structures because the fields don't exist.
+
+### Constraint 2.2: The Agent Reports Observations, Not Confirmations (Invariant 2, Axiom 1)
+`ObservationReport` has a field named `isMatch: bool`. This field means: "the extracted values match what the server told me to expect." It does NOT mean "the payment is confirmed," "the transfer is valid," or "the goods should be released."
+
+The field must be named `isMatch`. It must never be named `isConfirmed`, `isApproved`, `isVerified`, or `isPaid`. If you use any of these names, it implies decision authority the agent does not have. This is **CF-04**.
+
+The server receives `isMatch: true` and then applies its own business rules (fraud checks, amount tolerance, time window) before confirming the payment. The agent's observation is one input — not the final word.
+
+### Constraint 2.3: Only SMS from the Expected Sender Is Processed (Invariant 3)
+`ProcessIncomingSmsUseCase` checks `event.senderName` against `session.expectedSenderName` (case-insensitive, trimmed) before parsing. An SMS from any other sender is silently ignored — the use case returns `null`. No log entry, no error, no state change.
+
+**Why**: A device receives many SMS messages. Processing all of them against the parsing template wastes resources and risks false positives. Only the designated bank sender is relevant.
+
+### Constraint 2.4: Processing Only Occurs With an Active Session (Invariant 4)
+`ProcessIncomingSmsUseCase` checks `session.status == SessionStatus.active`. If the session is expired, matched, or in any other status, the use case returns `null`. The SMS is ignored.
+
+**Why**: If a previous session was already matched, a duplicate bank SMS (from a resend or bounce) should not trigger a second observation. The session status gates this.
+
+### Constraint 2.5: Parse Failure Produces a Report, Not Silence (Invariant 6)
+If `SmsParsingService.parse()` returns a `ParsedPaymentData` with null fields (no match, or regex error), `ProcessIncomingSmsUseCase` still creates a `BankSmsObservation` with null fields. `MatchObservationToIntentUseCase` evaluates `isMatch: false`. `ReportObservationUseCase` submits a report with `isMatch: false` and null parsed fields.
+
+**Why**: Silence is worse than a failure report. If the agent receives an SMS that looks like a payment notification but fails to parse, the server should know. A null-field report allows the server to investigate whether the parsing template is incorrect or whether the SMS format changed.
+
+### Constraint 2.6: Session Expiry Does Not Block Report Submission (Invariant 7)
+`ReportObservationUseCase` submits the observation report even if `session.expiresAt` has passed by the time the submission happens. Session expiry is a server-side concept. The agent's obligation is to report what it observed, regardless of timing.
+
+### Constraint 2.7: Audit Log Contains a Hash of Payer Name, Not the Name Itself
+When writing the audit log entry in `ReportObservationUseCase`, the payer name is logged as `sha256(payerName).substring(0, 12)` — a truncated hash used only for correlation, not for reconstruction. The actual name never appears in the audit log.
+
+**Why**: Payer names are personal data. The audit log is a security record, not a financial record. The hash allows an auditor to correlate events across log entries without retaining the actual identity.
+
+---
+
+## 3. What to Build
+
+### Domain: `lib/domain/payment_observation/`
+
+**`entities/session_status.dart`**
+`enum SessionStatus { active, matched, expired, reported }`
+
+**`entities/payment_observation_session.dart`**
+Fields: `sessionId` (String), `systemId` (String), `intentId` (String), `expectedSenderName` (String), `parsingTemplate` (String, opaque — owned by server), `expectedPayerName` (String?), `expectedAmount` (String), `expectedCurrency` (String, ISO 4217), `expiresAt` (DateTime), `status` (SessionStatus, default: `active`).
+`copyWith({SessionStatus? status})` method.
+
+**`entities/bank_sms_observation.dart`**
+Fields: `observationId` (String, generated locally via UUID), `sessionId` (String), `receivedAt` (DateTime), `parsedPayerName` (String?), `parsedAmount` (String?), `parsedCurrency` (String?).
+Convenience getter: `bool get hasAllFields`.
+No `rawBody` field. No `senderName` field. Only parsed data.
+
+**`value_objects/observation_report.dart`**
+Fields: `sessionId` (String), `intentId` (String), `observationId` (String), `isMatch` (bool — advisory), `parsedPayerName` (String?), `parsedAmount` (String?), `parsedCurrency` (String?), `reportedAt` (DateTime), `nonce` (String), `signature` (String), `agentPublicKeyId` (String).
+No field named `isConfirmed`, `isApproved`, `isPaid`. Only `isMatch`.
+
+**`repositories/payment_observation_repository.dart`**
+Failure types: `SessionNotFoundFailure`, `SessionNotActiveFailure`, `ReportSubmissionFailure(String detail)`.
+Methods:
+- `Future<Either<PaymentObservationFailure, PaymentObservationSession>> fetchSession({required String sessionId, required String systemId})`
+- `Future<Either<PaymentObservationFailure, void>> submitReport({required ObservationReport report, required String systemId})`
+
+**`use_cases/register_observation_session_use_case.dart`**
+Calls `repository.fetchSession()`. Logs `paymentSessionOpened`. Returns the result.
+
+**`use_cases/process_incoming_sms_use_case.dart`**
+Defines `class RawSmsEvent { final String senderName; final String body; final DateTime receivedAt; }`.
+Method `BankSmsObservation? execute({required RawSmsEvent event, required PaymentObservationSession session})`:
+1. If `session.status != SessionStatus.active` → return `null`
+2. If `event.senderName.trim().toLowerCase() != session.expectedSenderName.trim().toLowerCase()` → return `null`
+3. Call `parsingService.parse(rawSmsBody: event.body, parsingTemplate: session.parsingTemplate)` — `event.body` referenced only here
+4. Construct and return `BankSmsObservation` with parsed fields (possibly null)
+Note: `event.body` is never assigned to a local variable separate from the `parse()` call argument.
+
+**`use_cases/match_observation_to_intent_use_case.dart`**
+Defines `class ObservationMatchResult { final bool isMatch; final BankSmsObservation observation; }`.
+Method `ObservationMatchResult execute({required BankSmsObservation observation, required PaymentObservationSession session})`:
+- If `!observation.hasAllFields` → `isMatch: false`
+- Otherwise: compare `parsedAmount` == `expectedAmount`, `parsedCurrency.toUpperCase()` == `expectedCurrency.toUpperCase()`, and optionally `parsedPayerName.toLowerCase()` == `expectedPayerName.toLowerCase()` (if `expectedPayerName` is non-null)
+- All three conditions must be true for `isMatch: true`
+
+**`use_cases/report_observation_use_case.dart`**
+Dependencies: `PaymentObservationRepository`, `SigningService`, `NonceGenerator`, `AuditLogService`.
+Sequence:
+1. Build canonical signing input from `session_id`, `intent_id`, `observation_id`, `parsed_*` fields, `is_match`, `reported_at`, `nonce`
+2. Call `signingService.sign()`
+3. Construct `ObservationReport`
+4. Write audit log entry (`paymentSmsObserved`) with `sha256(parsedPayerName)[0:12]` — BEFORE network call
+5. Call `repository.submitReport()` (even if session is expired — Invariant 7)
+6. Write final audit entry (`paymentReportSubmitted`)
+
+### Infrastructure: `lib/shared/infrastructure/sms_receiver_service.dart`
+Class `SmsReceiverService` (singleton). Uses `EventChannel('com.superadmin.agent/sms_receiver')`. Maps incoming platform events to `RawSmsEvent` objects. Exposes `Stream<RawSmsEvent> get incomingSms`.
+Add: `// TODO(phase-6-android): Implement Kotlin BroadcastReceiver for SMS_RECEIVED → EventChannel`
+
+### Data: `lib/data/payment_observation/`
+Follow the same pattern as Phase 5 data layer:
+- `dtos/payment_observation_session_dto.dart` — maps `GET /v1/payment-sessions/{id}` response
+- `dtos/observation_report_dto.dart` — maps `ObservationReport` → POST body (no raw SMS body in body)
+- `remote/payment_observation_remote_data_source.dart`
+- `repositories/payment_observation_repository_impl.dart`
+
+### Presentation: `lib/presentation/payment_observation/cubit/`
+States: `PaymentObservationIdle`, `PaymentObservationLoading`, `PaymentObservationActive`, `PaymentObservationReported`, `PaymentObservationError(String message)`. No state carries raw SMS body.
+
+Cubit dependencies: `RegisterObservationSessionUseCase`, `ProcessIncomingSmsUseCase`, `MatchObservationToIntentUseCase`, `ReportObservationUseCase`, `SmsReceiverService`.
+`startObservation({required String sessionId, required String systemId})`: fetches session → emits `Active` → starts listening to `SmsReceiverService.incomingSms`.
+On each incoming SMS: processes → matches → reports → cancels subscription → emits `Reported`.
+Override `close()` to cancel the SMS subscription.
+
+### FCM Handler and DI
+Create `lib/shared/infrastructure/payment_observation_fcm_handler.dart`. Implements `CapabilityCommandHandler`. In `handle()`: retrieves `PaymentObservationCubit`, calls `startObservation()`.
+Update `lib/di/app_module.dart`: replace `// TODO(phase-6)` with payment observation module registrations.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why does `ProcessIncomingSmsUseCase` return `null` instead of `Either` on ignored SMS?**
+A `null` return means "nothing to do." An `Either` would imply either success or failure — but ignoring a non-matching SMS is neither. It is simply a non-event. The Cubit checks for `null` and skips without changing state.
+
+**Why is the parsing template treated as opaque?**
+The template is a regex string owned and versioned by the server. The agent does not know what bank the template is for, what version of the SMS format it matches, or whether the template is correct. It applies the template and reports what it extracted. If the template is wrong, the server updates it and issues a new session. The agent never modifies, validates, or caches the template.
+
+**Why is payer name hashed in the audit log?**
+The audit log may be exported to the server for remote review (Phase 7 TODO). If it contains raw payer names, it becomes personal data subject to privacy regulations. A truncated hash allows correlation ("these two events involve the same payer") without reconstruction ("this payer is named X").
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+**`ProcessIncomingSmsUseCase` tests must prove:**
+- SMS from the wrong sender returns `null` (no parse, no log)
+- SMS with an inactive session returns `null`
+- SMS from the correct sender with a matching template returns a `BankSmsObservation`
+- The returned `BankSmsObservation` has no field containing the raw SMS body
+- The returned `BankSmsObservation` has no field named `senderName`
+
+**`MatchObservationToIntentUseCase` tests must prove:**
+- All three fields matching → `isMatch: true`
+- One field mismatched → `isMatch: false`
+- Any null parsed field → `isMatch: false`
+- No field named `isConfirmed`, `isApproved`, or `isPaid` exists on `ObservationReport`
+
+**Architecture checks:**
+```bash
+# Raw SMS body must not appear in any persistent structure
+grep -r "rawBody\|smsBody\|rawSmsBody" lib/domain/payment_observation/entities/ lib/domain/payment_observation/value_objects/ lib/data/payment_observation/
+# Expected: zero results
+
+# isConfirmed, isApproved, isPaid must not exist
+grep -r "isConfirmed\|isApproved\|isPaid" lib/domain/payment_observation/
+# Expected: zero results
+
+# No payment types in other domains
+grep -r "payment_observation\|PaymentObservation\|BankSms" lib/domain/auth_2fa/ lib/domain/otp_gateway/
+# Expected: zero results
+```
+
+**Do not proceed to Phase 7 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not store the raw SMS body in any entity, DTO, state, or log entry
+- ❌ Do not name any field `isConfirmed`, `isApproved`, or `isPaid`
+- ❌ Do not confirm payments — only report observations
+- ❌ Do not cache or retain the parsing template on the device beyond the active session
+- ❌ Do not import payment observation types into the 2FA or OTP domains
+- ❌ Do not block report submission because the session has expired

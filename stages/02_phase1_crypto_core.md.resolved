@@ -1,0 +1,183 @@
+# Phase 1 — Cryptographic Infrastructure & Secure Storage Core
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 0 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+Every capability in this system — 2FA approval, OTP dispatch, payment observation — produces data that must be transmitted to a server. That server must be able to prove that the data came from THIS specific physical device and has not been tampered with. That guarantee is impossible without a cryptographic identity anchored to hardware.
+
+This phase creates that identity. It also establishes the only two storage abstractions that the entire system is allowed to use for sensitive data. Getting these wrong invalidates the security model for every subsequent phase.
+
+Nothing built in this phase is domain-specific. These are shared infrastructure services. They live in `lib/shared/`.
+
+---
+
+## 2. Constraints — Read These Before Writing a Single Line
+
+### Constraint 2.1: The Domain Layer Must Remain Pure
+Every file you create under `lib/shared/domain/` must contain only pure Dart. This means:
+- No `import 'package:flutter/...'`
+- No `import 'package:firebase_...'`
+- No `import 'package:dio/...'`
+- No Android or iOS platform types
+
+**Why**: The domain layer must be testable with a plain `dart test` runner — no Flutter engine, no Android emulator. If a domain file imports Flutter, it becomes impossible to unit test in isolation. This is Failure Code **AF-01**. Any violation found in a code review must be reverted before the phase is considered complete.
+
+### Constraint 2.2: `SigningService` Is the Only Signing Path
+Nowhere in the codebase — not in a repository, not in a data source, not in a use case — may there be a signature produced except by calling `SigningService.sign()`. Creating a second signing path, even for "convenience," violates **CF-02** and breaks the audit model.
+
+**Why**: If signing happens in two places, a bug in one place (wrong canonical input, wrong nonce handling) will produce signatures that fail server verification intermittently. Worse, a shortcut path that skips signing entirely will not be caught by the linter.
+
+### Constraint 2.3: `SecureStorageService` Is the Only Secret Storage Path
+Nowhere in the codebase may a secret (private key material, agent ID, system ID, base URL, capability list, session token) be written to `SharedPreferences`, plain SQLite, a file, or any other unencrypted storage. All writes go through `SecureStorageService`.
+
+**Why**: Android's `SharedPreferences` is readable by any process with physical access to the device or with root. The audit log is NOT a secret store — it holds event metadata, not credentials. Violation = **CF-01**.
+
+### Constraint 2.4: The Private Key Must Never Leave Its Storage Boundary
+In Phase 1 you implement a software-backed key using `pointycastle`. The private key bytes are written to `SecureStorageService` immediately and never held in a `String` variable beyond the minimum scope needed to call the signer. By Phase 7 this will be replaced with a true Android Keystore implementation where the private key never exists in Dart memory at all.
+
+The interface you write now must already enforce this boundary: `sign()` takes a string input and returns a string signature. The private key is an implementation detail hidden inside the service — callers never receive, store, or pass around key material.
+
+### Constraint 2.5: Nonces Are One-Use
+The `NonceGenerator` must use `Random.secure()`, not `Random()`. Each call must produce a fresh value. Nonces are never cached, stored, or reused. A nonce is consumed at the moment of signing and appears in exactly one server request.
+
+**Why**: Replay protection fails completely if nonces are reused. An attacker who captures a signed request can replay it if the server sees the same nonce again.
+
+### Constraint 2.6: The Audit Log Is Append-Only
+The SQLite table that backs `AuditLogService` must have a `BEFORE UPDATE` trigger that raises an abort. This is a structural enforcement of the append-only policy — not a convention that future code might accidentally bypass.
+
+**Why**: An audit log that can be silently modified is not an audit log. The value of the log depends entirely on its immutability.
+
+### Constraint 2.7: Message Body Never Appears in a Log Entry
+The `AuditActionType` enum you define here determines what fields are ever written to the log. None of these types carry a `messageBody`, `smsBody`, or `rawContent` field. The `AuditEntry` class has no such field. This is a structural constraint — you cannot log what the schema does not support.
+
+---
+
+## 3. What to Build
+
+You are building **interfaces** in `lib/shared/domain/` and **concrete implementations** in `lib/shared/data/` and `lib/shared/infrastructure/`. The interfaces define the contract; the implementations fulfill it.
+
+### Files to Create in `lib/shared/domain/`
+
+**`signing_service.dart`**
+Define:
+- `abstract class SigningFailure` — base class for signing errors. Two subtypes: `KeyUnavailableFailure` and `SigningOperationFailure`.
+- `abstract class SigningService` with these method signatures:
+  - `String get publicKeyId` — the key alias sent in the `X-Agent-Public-Key-Id` header
+  - `Either<SigningFailure, String> getPublicKeyBase64()` — the DER-encoded public key, base64url
+  - `Future<Either<SigningFailure, void>> generateKeyPair()` — idempotent, called once during pairing
+  - `Future<bool> hasKeyPair()`
+  - `Future<Either<SigningFailure, String>> sign(String canonicalInput)` — returns base64url signature
+  - `Future<Either<SigningFailure, void>> deleteKeyPair()` — called on full unpair only
+
+**`nonce_generator.dart`**
+Define:
+- `abstract class NonceGenerator` with one method: `String generate()`
+- Document: 256-bit, base64url encoded, no padding, `Random.secure()` only
+
+**`secure_storage_service.dart`**
+Define:
+- `abstract class StorageFailure` — three subtypes: `StorageWriteFailure`, `StorageReadFailure`, `StorageDeleteFailure`
+- `abstract class SecureStorageService` with: `write`, `read`, `delete`, `deleteAll`, `readAll`
+- All return `Either<StorageFailure, T>` — never throw
+
+**`audit_log_service.dart`**
+Define:
+- `enum AuditActionType` — exactly these values, no others: `pairingCompleted`, `pairingFailed`, `unpairingCompleted`, `challengeReceived`, `challengeResponded`, `challengeSubmissionFailed`, `otpDispatchReceived`, `otpSmsSent`, `otpSmsFailed`, `otpReportSubmitted`, `paymentSessionOpened`, `paymentSmsObserved`, `paymentParseFailed`, `paymentReportSubmitted`, `unknownCommandRejected`, `signingFailure`
+- `enum AuditOutcome` — `success`, `failure`, `partial`
+- `class AuditEntry` — fields: `entryId` (String), `actionType`, `systemId` (String), `commandId` (String?), `timestamp` (DateTime), `outcome`, `failureCode` (String?). No `messageBody`, no `smsBody`, no `rawContent`.
+- `abstract class AuditLogService` with: `Future<Either<AuditLogFailure, void>> log(AuditEntry)`, `queryAll()`, `queryBySystem(String systemId)`
+
+**`sms_parsing_service.dart`**
+Define:
+- `class ParsedPaymentData` — fields: `payerName` (String?), `amount` (String?), `currency` (String?). A `bool get hasAllFields` convenience getter.
+- `abstract class SmsParsingService` with: `ParsedPaymentData parse({required String rawSmsBody, required String parsingTemplate})` — never throws, null fields represent failure.
+
+### Files to Create in `lib/shared/data/`
+
+**`secure_storage_service_impl.dart`**
+Implements `SecureStorageService` using `flutter_secure_storage` with `AndroidOptions(encryptedSharedPreferences: true)`. All exceptions caught and returned as `Left(StorageFailure)`.
+
+**`crypto_nonce_generator.dart`**
+Implements `NonceGenerator`. Uses `Random.secure()`. Generates 32 bytes, encodes as base64url, strips padding `=`.
+
+**`sqlite_audit_log_service.dart`**
+Implements `AuditLogService`. Key requirements:
+- Single SQLite table: `audit_log`
+- On creation, install a `BEFORE UPDATE` trigger that calls `RAISE(ABORT, ...)` — enforcing append-only at the database engine level
+- `log()` inserts a row. It does not check for duplicates — every call produces a new row.
+- The singleton pattern (`instance`) is used because the database must be initialized once at app start.
+
+### Files to Create in `lib/shared/infrastructure/`
+
+**`android_keystore_signing_service.dart`**
+Implements `SigningService`. Phase 1 constraint: use `pointycastle` for EC P-256 key generation and ECDSA-SHA256 signing. Store the private key bytes in `SecureStorageService` under a fixed key name. The public key and key ID are also stored in `SecureStorageService`.
+
+Document the following as `// TODO(phase-7-android):` — do not implement:
+- Android Keystore hardware binding via platform channel
+- Synchronous `publicKeyId` from hardware key alias
+
+**`regex_sms_parsing_service.dart`**
+Implements `SmsParsingService`. Uses `RegExp` with the server-provided `parsingTemplate`. Requires named groups `payer`, `amount`, `currency`. Any exception from a malformed regex is caught; all null fields are returned.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why `Either` instead of exceptions?**
+Exceptions in Dart can be silently swallowed by `catch (_)` or propagate through layers in unpredictable ways. `Either<Failure, Value>` makes every failure path explicit — the caller must handle the `Left` case. There is no way to accidentally ignore a signing failure or a storage write failure when the return type forces the issue.
+
+**Why `dartz` and not a custom Result type?**
+`dartz` is already in the dependency list for other functional utilities (`Option`, etc.). Consistency is more important than "ownership" of the Result type.
+
+**Why software-backed keys in Phase 1 if this is a security-critical system?**
+The interface contract is correct: callers never see key material. The Phase 1 implementation is for development and testing. The interface's `sign()` method signature does not change when Phase 7 replaces the backing implementation with hardware Keystore. Making the interface right now is more important than making the implementation perfect.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+The tests in this phase exist to prove **invariants**, not just compilation.
+
+**Nonce generator tests must prove:**
+- Each call produces a value of exactly 43 characters (base64url of 32 bytes without padding)
+- No `+`, `/`, or `=` characters appear (proving URL-safe encoding)
+- 100 consecutive calls produce 100 distinct values (proving non-reuse)
+
+**SMS parsing service tests must prove:**
+- A valid SMS body matching the template returns all three named fields correctly
+- A body that does not match returns all null fields (not an exception)
+- A malformed regex (invalid pattern) returns all null fields (not an exception)
+- The raw `rawSmsBody` value does not appear anywhere in the return value (it is consumed, not stored)
+
+**Architecture tests must prove (run as grep checks, not unit tests):**
+```bash
+# Zero Flutter imports in domain
+grep -r "package:flutter" lib/shared/domain/
+# Expected: zero results
+
+# SecureStorageService implementation is in data/, not domain/
+ls lib/shared/domain/secure_storage_service_impl.dart
+# Expected: No such file
+
+# No signing logic outside SigningService
+grep -r "ECSignature\|ECDSA\|SHA-256" lib/shared/domain/ lib/data/ lib/presentation/
+# Expected: zero results (signing only in lib/shared/infrastructure/)
+```
+
+**Do not proceed to Phase 2 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not build any domain entity (`AuthChallenge`, `OtpDispatchCommand`, etc.)
+- ❌ Do not write any use case or repository
+- ❌ Do not build any HTTP client or network code
+- ❌ Do not build any Cubit, widget, or page
+- ❌ Do not create a second signing path anywhere outside `SigningService`
+- ❌ Do not store any key material in a local variable beyond the scope of the operation that uses it
+- ❌ Do not catch signing or storage exceptions silently — always propagate as `Left`

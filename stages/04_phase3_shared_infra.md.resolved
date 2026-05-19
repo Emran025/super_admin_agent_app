@@ -1,0 +1,160 @@
+# Phase 3 — Shared Infrastructure: HTTP Client, FCM Router, DI Bootstrap
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 2 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+Phases 4, 5, and 6 each build a capability that must speak to a server and respond to FCM push messages. Without the infrastructure built in this phase, all three capabilities would need to reinvent the same networking and routing logic — duplicating the signing interceptor, duplicating the registry check, duplicating the DI wiring. Duplication in security-critical infrastructure is dangerous because it creates divergent behaviors.
+
+This phase establishes three shared services that all capability phases depend on:
+
+1. **HTTP Client Factory** — produces authenticated `Dio` instances, with signing built in, for a specific paired system. The signing interceptor lives here and nowhere else.
+2. **FCM Message Router** — receives all incoming push messages and dispatches them to the correct capability handler. Unknown systems and ungranted capabilities are rejected here, before any handler is invoked.
+3. **DI Bootstrap** — wires all shared services and the pairing module. Capability modules are stubbed with `// TODO` markers; they will be filled in Phases 4–6.
+
+---
+
+## 2. Constraints — Read These Before Writing a Single Line
+
+### Constraint 2.1: The HTTP Client Factory Enforces CF-03 Structurally
+`HttpClientFactory.forSystem(String systemId)` must look up `systemId` in `PairedSystemRegistry` before creating any `Dio` instance. If the system is not found, it throws `ArgumentError` with a message that explicitly names **CF-03**. This is not a soft warning — it is a hard failure.
+
+**Why**: If the factory silently creates a client for an unknown system, the signing interceptor would attach a valid agent signature to a request going to an unknown endpoint. That signature could be captured and replayed. The check must happen before any client is constructed.
+
+### Constraint 2.2: The Signing Interceptor Is the Only Signing Path in the Network Layer
+Every `Dio` instance produced by `HttpClientFactory` has exactly one `_AgentSigningInterceptor` attached. This interceptor:
+1. Extracts the request body
+2. Serializes it as canonical JSON (keys sorted alphabetically at all nesting levels)
+3. Generates a fresh nonce
+4. Gets the current UTC timestamp as ISO 8601
+5. Concatenates `canonicalBody + "\n" + nonce + "\n" + timestamp` as the signing input
+6. Calls `SigningService.sign()` with that input
+7. Adds the four auth headers: `X-Agent-Id`, `X-Agent-Public-Key-Id`, `X-Agent-Nonce`, `X-Agent-Timestamp`, `X-Agent-Signature`
+
+If signing fails, the interceptor calls `handler.reject()` with a `DioException`. The request is never sent. This is **CF-02** prevention at the infrastructure level.
+
+### Constraint 2.3: The FCM Router Enforces Two Stop Conditions Before Dispatching
+`FcmMessageRouter.route(RemoteMessage)` must perform exactly these checks in this order:
+1. All three required fields present in `message.data`: `capability`, `command_id`, `system_id`. If any is missing → log `unknownCommandRejected` + stop.
+2. `system_id` is in `PairedSystemRegistry`. If not → log `unknownCommandRejected` + stop. (**CF-03**)
+3. `capability` is in `system.grantedCapabilities`. If not → log `unknownCommandRejected` + stop. (**CF-05**)
+4. A handler is registered for `capability`. If not → log `unknownCommandRejected` + stop. (**Axiom 10**)
+
+Only after all four checks pass is `handler.handle()` called. The handler receives only `commandId` and `systemId` — it never receives the raw `RemoteMessage`.
+
+### Constraint 2.4: Canonical JSON Has a Precise Definition
+The canonical JSON serialization used for signing input must: sort all keys alphabetically at every nesting level, use UTF-8 encoding, produce no trailing whitespace, and produce no pretty-printing. This must be a shared utility (`CanonicalJson.encode(Map<String, dynamic>)`) used consistently by all three capability signing paths. A different serialization in any one capability will produce signatures that fail server verification.
+
+### Constraint 2.5: DI Modules Are Per-Capability
+Do not register all services in a single flat function. Pairing services are registered in the pairing module function. Shared infrastructure is registered in the app module function. Capability registrations are left as `// TODO(phase-N):` comments — they must be present as comments so Phase N knows exactly where to add registrations.
+
+### Constraint 2.6: The Background FCM Handler Is a Top-Level Function
+Firebase Messaging requires the background message handler to be annotated with `@pragma('vm:entry-point')` and be a top-level function (not a method). In Phase 3, this function initializes Firebase and returns. The actual routing logic (`FcmMessageRouter.route()`) is not called from the background handler yet because DI is not available in the background isolate. This is documented as `// TODO(phase-7):`.
+
+---
+
+## 3. What to Build
+
+### `lib/shared/data/canonical_json.dart`
+A pure Dart utility class `CanonicalJson` with one static method: `String encode(Map<String, dynamic> data)`. Recursively sorts all map keys alphabetically before calling `jsonEncode`. Works for nested maps and lists. This utility has no dependencies and is fully unit testable without Flutter.
+
+### `lib/shared/data/http_client_factory.dart`
+Class `HttpClientFactory`. Constructor dependencies: `SigningService`, `NonceGenerator`, `PairedSystemRegistry`.
+Method: `Dio forSystem(String systemId)` — looks up the system, throws `ArgumentError` on unknown system (CF-03), creates a `Dio` with `BaseOptions` from `system.baseUrl`, attaches `_AgentSigningInterceptor`.
+
+Internal class `_AgentSigningInterceptor extends Interceptor`. Overrides `onRequest`. Builds the signing input, calls `signingService.sign()`, adds headers. On signing failure, calls `handler.reject(DioException(...))`.
+
+### `lib/shared/infrastructure/fcm_message_router.dart`
+Abstract class `CapabilityCommandHandler` with one method: `Future<void> handle({required String commandId, required String systemId})`.
+
+Class `FcmMessageRouter`. Constructor dependencies: `PairedSystemRegistry`, `AuditLogService`. Method `void registerHandler(String capabilityId, CapabilityCommandHandler handler)`. Method `Future<void> route(RemoteMessage message)` — implements the four-check sequence described in Constraint 2.3 above.
+
+Constant class `CapabilityId` with three string constants matching those in `Capability` value object from Phase 2.
+
+### `lib/di/app_module.dart`
+A top-level `Future<void> setupDependencies()` function. Registers in this order:
+1. `SecureStorageService` → `SecureStorageServiceImpl`
+2. `SigningService` → `AndroidKeystoreSigningService`
+3. `NonceGenerator` → `CryptoNonceGenerator`
+4. `AuditLogService` → `SqliteAuditLogService.instance`
+5. `SmsParsingService` → `RegexSmsParsingService`
+6. `PairingRepository` → `PairingRepositoryImpl` (with an unauthenticated `Dio()`)
+7. `PairedSystemRegistry` → `PairedSystemRegistryImpl`
+8. `HttpClientFactory`
+9. `FcmMessageRouter`
+10. Pairing use cases and `PairingCubit`
+11. `// TODO(phase-4): Register 2FA module bindings`
+12. `// TODO(phase-5): Register OTP Gateway module bindings`
+13. `// TODO(phase-6): Register Payment Observation module bindings`
+
+### Update `lib/main.dart`
+Add a top-level background FCM handler function (annotated `@pragma('vm:entry-point')`).
+`main()` must initialize in this order:
+1. `WidgetsFlutterBinding.ensureInitialized()`
+2. `await Firebase.initializeApp()`
+3. Register background handler
+4. `await SqliteAuditLogService.instance.init()`
+5. `await setupDependencies()`
+6. `await getIt<PairedSystemRegistry>().reload()`
+7. Register foreground FCM handler: `FirebaseMessaging.onMessage.listen((msg) => getIt<FcmMessageRouter>().route(msg))`
+8. `runApp(...)`
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why does the signing interceptor build canonical JSON from the request body?**
+The server verifies the signature against the exact canonical JSON it receives. If the mobile serializes `{"b":1,"a":2}` in the body but signs `{"a":2,"b":1}` (sorted), the signature will fail verification. The canonical JSON must be built before both the body is sent AND the signing input is constructed — they must be identical.
+
+**Why does `FcmMessageRouter` write to the audit log on rejection, not just log to console?**
+`print()` and `Logger` output disappears when the device is not connected to a debugger. The audit log is persistent. If the app is being probed with malformed FCM messages (e.g., someone has obtained the device's FCM token and is sending unauthorized commands), those rejections must be queryable after the fact.
+
+**Why is `FcmMessageRouter` ignorant of what each handler does?**
+The router's only job is gate-keeping. It does not know what `Auth2faFcmHandler` does with a command ID. This separation means: a bug in the 2FA handler does not break OTP routing, a new capability can be added by registering a new handler without touching the router, and the router can be tested exhaustively with mock handlers.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+**`CanonicalJson` tests must prove:**
+- A map with unsorted keys produces alphabetically sorted JSON
+- A nested map has its nested keys sorted independently
+- The output is identical across two calls with the same input
+
+**`FcmMessageRouter` tests must prove:**
+- A message with missing `capability` field → handler is never called, audit log receives one `unknownCommandRejected` entry
+- A message from an unknown `system_id` → handler is never called (**CF-03**)
+- A message for a capability not granted to the system → handler is never called (**CF-05**)
+- A valid message → handler is called exactly once with the correct `commandId` and `systemId`
+
+**Architecture checks:**
+```bash
+# No capability-specific logic in shared infrastructure
+grep -r "AuthChallenge\|OtpDispatch\|PaymentObservation" lib/shared/
+# Expected: zero results
+
+# Signing interceptor is the only place request headers are added
+grep -r "X-Agent-Signature\|X-Agent-Nonce" lib/
+# Expected: results only in lib/shared/data/http_client_factory.dart
+```
+
+**Compile check:**
+```bash
+flutter build apk --debug --no-pub
+# Expected: Successful build
+```
+
+**Do not proceed to Phase 4 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not implement any capability handler yet — only stubs as `// TODO` comments
+- ❌ Do not build any capability domain entity, use case, or repository
+- ❌ Do not create a `Dio` instance outside of `HttpClientFactory` or `PairingRepositoryImpl`
+- ❌ Do not add auth headers manually in any repository — the interceptor is the only path
+- ❌ Do not add capability-specific code (AuthChallenge, OtpDispatch, etc.) to the router

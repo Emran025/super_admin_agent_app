@@ -1,0 +1,177 @@
+# Phase 4 — Push-Based 2FA Capability
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 3 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+The 2FA capability exists to give a remote backend system a way to obtain explicit, cryptographically signed human approval before allowing a sensitive operation to proceed. The backend generates a challenge, sends it to the device via push, and waits. The owner taps Approve or Reject. The device signs that decision and sends it back. The backend trusts the decision only because the signature proves it came from this specific hardware.
+
+This phase builds the complete stack for that interaction: the domain model that describes a challenge and a decision, the use cases that orchestrate the ceremony, the data layer that communicates with the server, and the Cubit that drives the UI.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: The App Does Not Evaluate Legitimacy (Axiom 1, CF-04)
+The mobile app has no way to know whether a challenge is "real" or not. It does not check whether the context label looks legitimate. It does not warn about unusual login patterns. It does not apply expiry logic. All of those decisions belong to the server.
+
+The app's job is exactly: fetch the challenge → display it → collect the human decision → sign it → send it. If you add an `if` statement anywhere in the use cases or Cubit that evaluates whether to proceed based on challenge content, that is **CF-04**.
+
+### Constraint 2.2: The Decision Is Binary and Explicit (Invariant 2)
+`AgentDecision` is a sealed enum with exactly two values: `approve` and `reject`. There is no third value. There is no timeout-equals-reject path. There is no auto-approve. If the owner dismisses the dialog without tapping a button, the challenge remains in `pending` status locally until the server marks it expired. No response is sent.
+
+**Why**: Auto-approval paths defeat the entire security purpose of the 2FA system. A "timeout = reject" path would make the system unusable when the owner is slow to respond. The server enforces its own expiry; the app does not need to mirror it.
+
+### Constraint 2.3: The Audit Log Is Written Before the Network Call (Invariant 8)
+`SubmitChallengeResponseUseCase` writes an audit entry with `outcome: AuditOutcome.partial` BEFORE calling `repository.submitResponse()`. After the call returns, it writes a second entry with the actual outcome (`success` or `failure`).
+
+**Why**: If the network call succeeds but the app crashes before logging, the audit trail has a gap. If the audit write happens first and the network call fails, the log shows a `SUBMISSION_FAILED` entry. The pre-submission entry is honest about the attempt regardless of network outcome.
+
+### Constraint 2.4: A Responded Challenge Cannot Be Responded to Again (Invariant 5)
+`RecordUserDecisionUseCase` must check that `challenge.status == ChallengeStatus.pending` before producing a `SignedChallengeResponse`. If the challenge is in any other status, it returns `Left(ChallengeAlreadyRespondedException())`. No signature is produced, no network call is made.
+
+**Why**: Producing a second signed response for the same challenge could allow a confused UI state to submit two contradictory decisions. The server should reject the duplicate (HTTP 409), but the client must not even attempt it.
+
+### Constraint 2.5: Every Response Carries a Fresh Nonce (Invariant 4)
+`RecordUserDecisionUseCase` generates a new nonce via `NonceGenerator.generate()` for every call. The nonce is generated inside the use case at signing time — not before, not cached, not passed in by the caller.
+
+### Constraint 2.6: The Signing Input Is Canonical
+The signing input for a challenge response is built as: `CanonicalJson.encode(payload) + "\n" + nonce + "\n" + timestamp`. The payload map contains: `challenge_id`, `decision` (as a string: "approve" or "reject"), `responded_at`, `nonce`. The keys are sorted by `CanonicalJson` — do not pre-sort them manually.
+
+### Constraint 2.7: No Business Logic in the Cubit (AF-03)
+The `AuthChallengeCubit` calls use cases and translates `Either` results into state emissions. It does not check expiry timestamps. It does not apply retry logic. It does not evaluate whether the challenge should be shown. Those decisions belong to use cases.
+
+---
+
+## 3. What to Build
+
+### Domain: `lib/domain/auth_2fa/`
+
+**`entities/challenge_status.dart`**
+`enum ChallengeStatus { pending, responded, expiredRemote, superseded }`
+
+**`entities/auth_challenge.dart`**
+Fields: `challengeId` (String), `systemId` (String), `issuedAt` (DateTime), `expiresAt` (DateTime), `contextLabel` (String), `status` (ChallengeStatus, default: `pending`).
+`copyWith({ChallengeStatus? status})` method.
+Extends `Equatable`. Props: `[challengeId, systemId, status]`.
+
+**`value_objects/agent_decision.dart`**
+`enum AgentDecision { approve, reject }` — two values, no others.
+
+**`value_objects/signed_challenge_response.dart`**
+Immutable. Fields: `challengeId` (String), `decision` (AgentDecision), `respondedAt` (DateTime), `nonce` (String), `signature` (String), `agentPublicKeyId` (String). Extends `Equatable`.
+This class can only be constructed with a non-empty `signature`. Adding an assertion `assert(signature.isNotEmpty)` enforces this at runtime.
+
+**`repositories/auth_challenge_repository.dart`**
+Failure types: `ChallengeNotFoundFailure`, `ChallengeNotActionableFailure(String reason)`, `ChallengeSubmissionFailure(String detail)`, `ChallengeAlreadyRespondedException`.
+Interface methods:
+- `Future<Either<AuthChallengeFailure, AuthChallenge>> fetchChallenge({required String challengeId, required String systemId})`
+- `Future<Either<AuthChallengeFailure, void>> submitResponse({required SignedChallengeResponse response, required String systemId})`
+
+**`use_cases/receive_auth_challenge_use_case.dart`**
+Dependencies: `AuthChallengeRepository`, `AuditLogService`.
+Calls `repository.fetchChallenge()`. Logs `challengeReceived` with the appropriate outcome. Returns the result. Does not evaluate the challenge content.
+
+**`use_cases/record_user_decision_use_case.dart`**
+Dependencies: `SigningService`, `NonceGenerator`.
+Sequence:
+1. Check `challenge.status == ChallengeStatus.pending` → if not, return `Left(ChallengeAlreadyRespondedException())`
+2. Get `respondedAt = DateTime.now().toUtc()`
+3. Generate `nonce = nonceGenerator.generate()`
+4. Build canonical signing input
+5. Call `signingService.sign(signingInput)`
+6. On success: construct and return `Right(SignedChallengeResponse(...))`
+7. On signing failure: return `Left(ChallengeSubmissionFailure(...))`
+
+**`use_cases/submit_challenge_response_use_case.dart`**
+Dependencies: `AuthChallengeRepository`, `AuditLogService`.
+Sequence (order is mandatory):
+1. Write audit entry: `challengeResponded`, `outcome: partial` ← BEFORE network call
+2. Call `repository.submitResponse()`
+3. Write audit entry: `challengeResponded` (success) or `challengeSubmissionFailed` (failure)
+4. Return the result
+
+### Data: `lib/data/auth_2fa/`
+
+**`dtos/auth_challenge_dto.dart`**
+Maps the server JSON response from `GET /v1/challenges/{id}` to `AuthChallenge`. Maps `status` string values: `"PENDING"` → `ChallengeStatus.pending`, `"RESPONDED"` or `"EXPIRED"` → appropriate status.
+
+**`remote/auth_challenge_remote_data_source.dart`**
+Takes a `Dio` instance (produced by `HttpClientFactory.forSystem()` — already signed).
+`fetchChallenge(String challengeId)` — `GET /v1/challenges/{challengeId}`. HTTP 410 → `ChallengeNotActionableFailure`. HTTP 404 → `ChallengeNotFoundFailure`.
+`submitResponse(SignedChallengeResponse response)` — `POST /v1/challenges/{challengeId}/respond` with the response body containing `decision`, `responded_at`, `nonce`, `agent_public_key_id`, `signature`. HTTP 409 → `ChallengeAlreadyRespondedException`. HTTP 401 → `ChallengeSubmissionFailure('signature_rejected')`.
+
+**`repositories/auth_challenge_repository_impl.dart`**
+Implements `AuthChallengeRepository`. Delegates to `AuthChallengeRemoteDataSource`. Passes `systemId` down for future use (e.g., multi-system disambiguation).
+
+### Presentation: `lib/presentation/auth_2fa/`
+
+**`cubit/auth_challenge_state.dart`**
+States: `AuthChallengeIdle`, `AuthChallengeFetching`, `AuthChallengeReady(AuthChallenge challenge)`, `AuthChallengeSubmitting`, `AuthChallengeSubmitted`, `AuthChallengeError(String message)`.
+
+**`cubit/auth_challenge_cubit.dart`**
+Dependencies: `ReceiveAuthChallengeUseCase`, `RecordUserDecisionUseCase`, `SubmitChallengeResponseUseCase`.
+`loadChallenge({required String challengeId, required String systemId})`: emits `Fetching` → calls receive use case → emits `Ready` or `Error`.
+`submitDecision(AgentDecision decision)`: from `Ready` state only. Emits `Submitting` → calls record use case → calls submit use case → emits `Submitted` or `Error`.
+
+**`widgets/challenge_approval_dialog.dart`**
+A `StatelessWidget` wrapped in `BlocConsumer`. Uses `PopScope(canPop: false)` — the owner cannot back out without making a decision. Displays: `contextLabel`, `challengeId` (for reference), `expiresAt`. Two buttons: APPROVE and REJECT. Each calls `cubit.submitDecision()` with the appropriate `AgentDecision`. No auto-dismiss on timeout.
+
+### FCM Handler and DI
+
+**`lib/shared/infrastructure/auth_2fa_fcm_handler.dart`**
+Implements `CapabilityCommandHandler`. In `handle()`: retrieves the `AuthChallengeCubit` from `GetIt`, calls `loadChallenge()`, then pushes the approval dialog via the global navigator key. Document the navigator key dependency as `// TODO(phase-7): move navigator key to a dedicated navigation service`.
+
+Update `lib/di/app_module.dart`: replace `// TODO(phase-4)` with registrations for `AuthChallengeRemoteDataSource` (factory with systemId param), `AuthChallengeRepository` (factory with systemId param), and `AuthChallengeCubit`. Register `Auth2faFcmHandler` with the FCM router.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why are there three separate use cases instead of one `Handle2faChallenge` use case?**
+Each use case has exactly one responsibility. `ReceiveAuthChallengeUseCase` is testable independently of the signing logic. `RecordUserDecisionUseCase` is testable independently of the network call. `SubmitChallengeResponseUseCase` is testable independently of the signing logic. If they were merged, a test for submission would require mocking signing, which tests the wrong boundary.
+
+**Why does the approval dialog use `PopScope(canPop: false)`?**
+A challenge cannot be "dismissed" — there is no neutral outcome. If the owner cannot respond right now, they leave the dialog open until they can. The challenge will expire on the server side if ignored. Adding a "cancel" path that sends no response is acceptable (the challenge expires); adding a "cancel" that sends a reject without the owner tapping Reject is not.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+**`RecordUserDecisionUseCase` tests must prove:**
+- A `pending` challenge produces a `SignedChallengeResponse` with a non-empty `signature`
+- A non-`pending` challenge returns `Left(ChallengeAlreadyRespondedException)` without calling `SigningService`
+- Two consecutive calls produce different nonces (proving `NonceGenerator` is called fresh each time)
+- The `signature` field in the response is never empty
+
+**`SubmitChallengeResponseUseCase` tests must prove (mock `AuditLogService` and record call order):**
+- `auditLogService.log()` is called BEFORE `repository.submitResponse()`
+- On repository success, a second log entry with `success` outcome is written
+- On repository failure, a second log entry with `failure` outcome is written
+
+**Architecture checks:**
+```bash
+# No Flutter imports in 2FA domain
+grep -r "package:flutter\|package:firebase\|package:dio" lib/domain/auth_2fa/
+# Expected: zero results
+
+# No 2FA domain types imported in other capability domains
+grep -r "auth_2fa" lib/domain/otp_gateway/ lib/domain/payment_observation/
+# Expected: zero results
+```
+
+**Do not proceed to Phase 5 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not add any logic to the Cubit that evaluates whether a challenge is legitimate
+- ❌ Do not add a timeout-equals-auto-reject path anywhere
+- ❌ Do not allow `PopScope` to be removed from the approval dialog
+- ❌ Do not import any 2FA type into the OTP or Payment domains
+- ❌ Do not produce a `SignedChallengeResponse` outside of `RecordUserDecisionUseCase`
+- ❌ Do not write the audit log entry after the network call — before is mandatory

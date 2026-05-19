@@ -1,0 +1,167 @@
+# Phase 5 — SMS OTP Gateway Capability
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 4 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+Some backend systems need to deliver OTP codes to users via SMS from a specific registered phone number — not a shared SMS provider pool, not an email-to-SMS gateway, but a real SIM in a real device. This capability turns the Super Admin device into a trusted SMS relay: the server generates the OTP and the message body, sends both to the device via FCM, and the device sends the actual SMS using Android's `SmsManager`.
+
+The agent does not know what the OTP is. It does not store the message body. It does not log the content. It receives an opaque message body, passes it immediately to the SMS sender, and then reports whether the send succeeded.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: The Message Body Is Write-Only (Invariant 1)
+`OtpDispatchCommand.messageBody` exists only so it can be passed to `SmsSenderService.send()`. After that call returns, `messageBody` must not be referenced again. It must not appear in:
+- `SmsDeliveryReport` or any DTO
+- Any log entry, any audit field, any `failureCode`
+- Any cubit state class
+- Any variable that outlives the `ExecuteSmsDispatchUseCase.execute()` call
+
+**Why**: The OTP value inside the message body is a secret. It has a short validity window. Storing it, logging it, or persisting it in any form extends the attack surface for the duration of that retention. If an attacker gains read access to the device's log or state, they must find zero OTP values.
+
+The structural enforcement: `SmsDeliveryReport` has no `messageBody` field. `OtpDispatchState` has no `messageBody` field. The audit `AuditEntry` schema (defined in Phase 1) has no content field. If you cannot physically put the message body somewhere, you cannot leak it.
+
+### Constraint 2.2: Delivery Failure Does Not Trigger Retry (Invariant 2)
+If `SmsSenderService.send()` returns `SmsDeliveryStatus.failedNoService` or `SmsDeliveryStatus.failedGeneric`, the use case builds a report with that status and submits it to the server. It does not retry. It does not wait. It does not attempt an alternative delivery method.
+
+**Why**: The server already knows OTPs have a validity window. If the SMS fails, the server will generate a new OTP when the user retries. App-side retry logic risks delivering a duplicate SMS if the first one was actually sent but the confirmation was lost. Retry decisions belong to the server, not the agent.
+
+### Constraint 2.3: A Command Can Only Be Dispatched Once (Invariant 4)
+`ExecuteSmsDispatchUseCase` checks that `command.status == DispatchStatus.pending` before calling `SmsSenderService.send()`. If the status is anything else, it returns `Left(CommandAlreadyDispatchedFailure())` without sending an SMS.
+
+**Why**: FCM delivery is at-least-once. A command FCM may be delivered twice. If the agent sends an SMS on every delivery of the same command, the recipient receives duplicate OTPs. The status check is the idempotency guard.
+
+### Constraint 2.4: Every Delivery Report Is Signed (Invariant 5, Axiom 6)
+`ExecuteSmsDispatchUseCase` signs the delivery report using `SigningService`. The signing input is a canonical JSON of `command_id`, `status`, `reported_at`, `nonce`. The server uses this signature to verify the report came from the correct agent.
+
+### Constraint 2.5: `SmsSenderService` Is a Domain Interface
+`SmsSenderService` is defined as an abstract class inside `lib/domain/otp_gateway/use_cases/execute_sms_dispatch_use_case.dart` (or in its own file at `lib/domain/otp_gateway/`). Its implementation (`AndroidSmsSenderService`) lives in `lib/shared/infrastructure/`. The domain defines the contract; the platform provides the mechanism.
+
+**Why**: If `AndroidSmsSenderService` (which uses Flutter's `MethodChannel`) were imported directly in the use case, the domain would depend on Flutter — violating **AF-01**. The interface allows the use case to be tested with a mock sender that doesn't require Android.
+
+### Constraint 2.6: The Platform Channel Is a Stub in Phase 5
+`AndroidSmsSenderService` uses `MethodChannel('com.superadmin.agent/sms_sender')`. The Kotlin side of this channel is not implemented until the native Android phase. In Phase 5, the Dart implementation of `AndroidSmsSenderService` is complete. The channel will return `PlatformException` in tests — this is acceptable because the test for `ExecuteSmsDispatchUseCase` uses a mock `SmsSenderService`, not the real platform implementation.
+
+---
+
+## 3. What to Build
+
+### Domain: `lib/domain/otp_gateway/`
+
+**`entities/dispatch_status.dart`**
+`enum DispatchStatus { pending, dispatched, failed }`
+
+**`entities/otp_dispatch_command.dart`**
+Fields: `commandId` (String), `systemId` (String), `recipientPhoneNumber` (String), `messageBody` (String), `issuedAt` (DateTime), `simSlot` (SimSlot enum: `defaultSlot`, `sim1`, `sim2`), `status` (DispatchStatus, default: `pending`).
+`copyWith({DispatchStatus? status})` method.
+Docstring on `messageBody`: **"Write-only. Pass to SmsSenderService immediately. Do not store, log, or reference after send() returns. (Invariant 1)"**
+
+**`value_objects/sms_delivery_report.dart`**
+Fields: `commandId` (String), `status` (SmsDeliveryStatus: `sent`, `delivered`, `failedNoService`, `failedGeneric`), `reportedAt` (DateTime), `nonce` (String), `signature` (String), `agentPublicKeyId` (String).
+No `messageBody` field. No `recipientPhoneNumber` field. Extends `Equatable`.
+
+**`repositories/otp_gateway_repository.dart`**
+Failure types: `CommandNotFoundFailure`, `CommandAlreadyDispatchedFailure`, `SmsDispatchFailure(String detail)`, `ReportSubmissionFailure(String detail)`.
+Interface methods:
+- `Future<Either<OtpGatewayFailure, OtpDispatchCommand>> fetchCommand({required String commandId, required String systemId})`
+- `Future<Either<OtpGatewayFailure, void>> submitDeliveryReport({required SmsDeliveryReport report, required String systemId})`
+
+**`use_cases/receive_dispatch_command_use_case.dart`**
+Dependencies: `OtpGatewayRepository`, `AuditLogService`.
+Calls `repository.fetchCommand()`. Logs `otpDispatchReceived`. Returns the result. Does NOT touch the message body.
+
+**`use_cases/execute_sms_dispatch_use_case.dart`**
+Also defines `abstract class SmsSenderService` here (domain interface).
+Dependencies: `SmsSenderService`, `SigningService`, `NonceGenerator`, `AuditLogService`.
+Sequence:
+1. Check `command.status == DispatchStatus.pending` → if not, return `Left(CommandAlreadyDispatchedFailure())`
+2. Call `smsSenderService.send(recipientPhoneNumber: ..., messageBody: command.messageBody, simSlot: ...)` — `messageBody` is passed directly; the local reference is not used after this line
+3. Generate `nonce`, get `reportedAt`
+4. Build canonical signing input from `command_id`, `status`, `reported_at`, `nonce`
+5. Call `signingService.sign(...)` → on failure, return `Left(SmsDispatchFailure(...))`
+6. Construct `SmsDeliveryReport` and return `Right(report)`
+
+**`use_cases/report_delivery_status_use_case.dart`**
+Dependencies: `OtpGatewayRepository`, `AuditLogService`.
+Write audit log entry (`otpSmsSent` or `otpSmsFailed`) BEFORE calling `repository.submitDeliveryReport()`. Write a final entry (`otpReportSubmitted`) after. Return the result.
+
+### Infrastructure: `lib/shared/infrastructure/android_sms_sender_service.dart`
+Implements `SmsSenderService`. Uses `MethodChannel('com.superadmin.agent/sms_sender')`. Invokes method `'sendSms'` with a map of `recipient`, `body`, `sim_slot`. Maps the string return value to `SmsDeliveryStatus`. On `PlatformException`, returns `SmsDeliveryStatus.failedGeneric`.
+Add: `// TODO(phase-5-android): Implement Kotlin MethodChannel handler using SmsManager with sentIntent PendingIntent`
+
+### Data: `lib/data/otp_gateway/`
+
+**`dtos/otp_dispatch_command_dto.dart`**
+Maps `GET /v1/otp-commands/{id}` JSON response to `OtpDispatchCommand`. Maps `sim_slot` string values to `SimSlot` enum.
+
+**`remote/otp_gateway_remote_data_source.dart`**
+`fetchCommand(String commandId)` — `GET /v1/otp-commands/{commandId}`.
+`submitDeliveryReport(SmsDeliveryReport report)` — `POST /v1/otp-commands/{commandId}/report` with body: `command_id`, `status` (string), `reported_at`, `nonce`, `agent_public_key_id`, `signature`. No `messageBody` in the POST body.
+
+**`repositories/otp_gateway_repository_impl.dart`**
+Delegates to `OtpGatewayRemoteDataSource`.
+
+### Presentation: `lib/presentation/otp_gateway/cubit/`
+
+**`otp_dispatch_state.dart`**
+States: `OtpIdle`, `OtpFetching`, `OtpDispatching`, `OtpDispatched`, `OtpError(String message)`. No state carries `messageBody`.
+
+**`otp_dispatch_cubit.dart`**
+Dependencies: `ReceiveDispatchCommandUseCase`, `ExecuteSmsDispatchUseCase`, `ReportDeliveryStatusUseCase`.
+`handleCommand({required String commandId, required String systemId})`: orchestrates the three use cases sequentially. Emits appropriate states. Does not hold a reference to `messageBody` — the use case handles it entirely.
+
+### FCM Handler and DI
+Create `lib/shared/infrastructure/otp_gateway_fcm_handler.dart`. Implements `CapabilityCommandHandler`. In `handle()`: retrieves `OtpDispatchCubit` from `GetIt`, calls `handleCommand()`.
+Update `lib/di/app_module.dart`: replace `// TODO(phase-5)` with OTP module registrations. Register `OtpGatewayFcmHandler` with the FCM router.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why is the status reported even on failure?**
+The server knows a command was dispatched (it received the FCM delivery confirmation). It does not know whether the SMS was actually sent. A `failedGeneric` report is more useful than silence — the server can generate a fresh OTP and try again. Silence leaves the server waiting for a report that never arrives, which means the original OTP remains valid until it times out, increasing exposure.
+
+**Why does `OtpDispatchCubit` not hold the command's `messageBody` in state?**
+State objects in Flutter are often serialized, inspected in Flutter DevTools, or logged in crash reports. Any state that contains `messageBody` risks exposing the OTP content. The Cubit's job is to track workflow progress (`fetching`, `dispatching`, `dispatched`) — it does not need the body to do that.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+**`ExecuteSmsDispatchUseCase` tests must prove:**
+- A `pending` command results in `smsSenderService.send()` being called exactly once
+- A non-`pending` command returns `Left(CommandAlreadyDispatchedFailure)` with `send()` never called
+- The returned `SmsDeliveryReport` has a non-empty `signature`
+- The `SmsDeliveryReport` has no field containing `messageBody` or the original SMS content
+- `smsSenderService.send()` receives the correct `recipientPhoneNumber` and `messageBody` from the command
+
+**`ReportDeliveryStatusUseCase` tests must prove:**
+- `auditLogService.log()` is called BEFORE `repository.submitDeliveryReport()`
+
+**Architecture checks:**
+```bash
+# messageBody must not appear in any report, state, or log
+grep -r "messageBody" lib/domain/otp_gateway/value_objects/ lib/presentation/otp_gateway/ lib/data/otp_gateway/remote/
+# Expected: zero results
+
+# No OTP domain types in other domains
+grep -r "otp_gateway\|OtpDispatch" lib/domain/auth_2fa/ lib/domain/payment_observation/
+# Expected: zero results
+```
+
+**Do not proceed to Phase 6 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not store `messageBody` in any state, DTO, report, or log entry
+- ❌ Do not implement retry logic for failed SMS sends
+- ❌ Do not import Android SMS APIs or `MethodChannel` into the domain layer
+- ❌ Do not allow the Cubit to hold a reference to the dispatch command's message content
+- ❌ Do not send the message body back to the server in the delivery report

@@ -1,0 +1,260 @@
+# Phase 0 Prompt — Flutter Project Scaffold & Dependency Setup
+
+> **Copy-paste this entire block into your engineering AI.**
+
+---
+
+## 1. Why This Phase Exists
+
+Every subsequent phase depends on a stable, correctly structured project. If the folder structure is wrong, imports will be wrong in every phase. If a dependency is missing or pinned incorrectly, phases 1–7 will fail to compile. This phase has exactly one purpose: create a buildable, correctly structured foundation. Nothing else.
+
+---
+
+## 2. Your Exact Mandate
+
+You are the Flutter engineer beginning work on the **Super Admin Mobile Agent** — a private, sideloaded, owner-controlled application. It is NOT a consumer app.
+
+**You must:**
+- Create a new Flutter project targeting Android only
+- Replace pubspec.yaml with the exact dependency list below
+- Create the full `lib/` directory structure with placeholder files
+- Configure Android manifest permissions
+- Configure linting rules
+- Verify everything compiles
+
+**You must NOT:**
+- Write any business logic, domain entity, use case, or repository
+- Add any dependency not listed below without written justification
+- Set `minSdkVersion` below 26 (required for Android Keystore and SMS APIs)
+- Create any UI screens beyond the minimal placeholder in `main.dart`
+
+---
+
+## 3. Constraints
+
+### Why minSdkVersion 26?
+Android Keystore hardware-backed key generation (used in Phase 1) requires API 23+. The `SmsManager` dual-SIM APIs require API 22+. The `android.permission.RECEIVE_SMS` broadcast receiver for real-time SMS monitoring requires correct setup from API 19+. We set 26 as the floor to ensure all security APIs are available without fallback paths.
+
+### Why Android only?
+All three capabilities (2FA push approval, SMS gateway, bank SMS monitoring) depend on Android-specific hardware and APIs: Android Keystore, SmsManager, BroadcastReceiver for SMS_RECEIVED. iOS has none of these equivalents.
+
+### Why these exact dependencies?
+| Package | Reason |
+|---|---|
+| `get_it` | Dependency injection — wires interfaces to implementations without coupling layers |
+| `dartz` | Functional error handling — `Either<Failure, Value>` replaces exceptions as flow control |
+| `equatable` | Value equality on domain entities without boilerplate |
+| `flutter_bloc` (Cubit only) | Predictable, testable state management in presentation layer |
+| `dio` | HTTP client with interceptor support (signing interceptor added in Phase 3) |
+| `flutter_secure_storage` | Android EncryptedSharedPreferences — only acceptable plaintext-free storage for secrets |
+| `sqflite` | Append-only audit log database |
+| `pointycastle` | EC P-256 key generation and ECDSA signing (Phase 1 software implementation) |
+| `firebase_core` + `firebase_messaging` | FCM push notification delivery for 2FA and OTP commands |
+| `mobile_scanner` | QR code scanning for pairing ceremony |
+| `decimal` | Money arithmetic — `double` is forbidden for financial amounts |
+| `uuid` | Audit log entry IDs and local observation IDs |
+| `logger` | Structured logging — `print()` is forbidden in production |
+
+---
+
+## 4. What to Build
+
+### Step A: Create the project
+```bash
+flutter create --org com.superadmin --project-name super_admin_agent --platforms android super_admin_agent_app
+```
+
+### Step B: Replace pubspec.yaml
+```yaml
+name: super_admin_agent
+description: "Private Trusted Mobile Agent — Push 2FA, SMS OTP Gateway, Payment Observation."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  get_it: ^7.7.0
+  dartz: ^0.10.1
+  equatable: ^2.0.5
+  flutter_bloc: ^8.1.5
+  dio: ^5.4.3
+  flutter_secure_storage: ^9.2.2
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  local_auth: ^2.2.0
+  pointycastle: ^3.9.1
+  firebase_core: ^3.3.0
+  firebase_messaging: ^15.1.0
+  mobile_scanner: ^5.2.3
+  decimal: ^3.0.2
+  uuid: ^4.4.2
+  logger: ^2.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+```
+
+### Step C: Create this exact directory tree
+Every leaf directory must contain exactly one file named `placeholder.dart` with this content and nothing else:
+```dart
+// TODO(phase-0): Replace with implementation in the assigned phase.
+```
+
+```
+lib/
+├── domain/
+│   ├── auth_2fa/
+│   │   ├── entities/
+│   │   ├── value_objects/
+│   │   ├── repositories/
+│   │   └── use_cases/
+│   ├── otp_gateway/
+│   │   ├── entities/
+│   │   ├── value_objects/
+│   │   ├── repositories/
+│   │   └── use_cases/
+│   ├── payment_observation/
+│   │   ├── entities/
+│   │   ├── value_objects/
+│   │   ├── repositories/
+│   │   └── use_cases/
+│   └── pairing/
+│       ├── entities/
+│       ├── value_objects/
+│       ├── repositories/
+│       └── use_cases/
+├── data/
+│   ├── auth_2fa/
+│   │   ├── dtos/
+│   │   ├── remote/
+│   │   └── repositories/
+│   ├── otp_gateway/
+│   │   ├── dtos/
+│   │   ├── remote/
+│   │   └── repositories/
+│   ├── payment_observation/
+│   │   ├── dtos/
+│   │   ├── remote/
+│   │   └── repositories/
+│   └── pairing/
+│       ├── dtos/
+│       ├── local/
+│       ├── remote/
+│       └── repositories/
+├── presentation/
+│   ├── auth_2fa/
+│   │   ├── cubit/
+│   │   └── widgets/
+│   ├── otp_gateway/
+│   │   └── cubit/
+│   ├── payment_observation/
+│   │   └── cubit/
+│   ├── pairing/
+│   │   ├── cubit/
+│   │   └── pages/
+│   └── dashboard/
+│       └── pages/
+├── shared/
+│   ├── domain/
+│   ├── data/
+│   └── infrastructure/
+└── di/
+```
+
+### Step D: Android manifest — add inside `<manifest>` before `<application>`
+```xml
+<uses-permission android:name="android.permission.SEND_SMS"/>
+<uses-permission android:name="android.permission.RECEIVE_SMS"/>
+<uses-permission android:name="android.permission.READ_SMS"/>
+<uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+<uses-permission android:name="android.permission.INTERNET"/>
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+<uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+<uses-permission android:name="android.permission.CAMERA"/>
+```
+
+Add to `<application>` tag: `android:usesCleartextTraffic="false"`
+
+This enforces HTTPS-only at the OS level. Any accidental plain HTTP call will fail at the network layer, not silently succeed.
+
+### Step E: `android/app/build.gradle`
+Set `minSdkVersion 26` in the `defaultConfig` block.
+
+### Step F: `analysis_options.yaml`
+```yaml
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - avoid_print
+    - always_declare_return_types
+    - prefer_final_locals
+    - prefer_const_constructors
+    - avoid_dynamic_calls
+
+analyzer:
+  errors:
+    missing_return: error
+    unused_import: error
+    dead_code: warning
+```
+
+### Step G: Minimal `lib/main.dart`
+```dart
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const SuperAdminAgentApp());
+}
+
+class SuperAdminAgentApp extends StatelessWidget {
+  const SuperAdminAgentApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Super Admin Agent',
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Text(
+            'Phase 0: Scaffold Only',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 5. Verification — Must ALL Pass Before Phase 1
+
+```bash
+# Dependency resolution — must complete with no errors
+flutter pub get
+
+# Static analysis — must show "No issues found!"
+flutter analyze
+
+# Compilation check — must produce an APK without errors
+flutter build apk --debug --no-pub
+
+# Directory existence check — must show all 40+ directories
+find lib/ -type d | sort
+```
+
+**Do not proceed to Phase 1 if any of these produce errors.**

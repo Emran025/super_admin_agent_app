@@ -1,0 +1,192 @@
+# Phase 2 — Pairing Domain & Secure Registry
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 1 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+The mobile agent is useless until it has a cryptographically established relationship with a backend system. Without pairing, there is no server to send commands, no capability list, no agent identity the server will recognize. Pairing is the trust bootstrapping ceremony — it happens once per system, it is initiated by the owner physically scanning a QR code, and its outcome is a `PairedSystem` record stored securely on the device.
+
+After this phase, the app can:
+- Parse and validate a pairing QR token
+- Generate its key pair (via the `SigningService` from Phase 1)
+- Register its public key with the server
+- Store the resulting `PairedSystem` in `SecureStorageService`
+- Load all paired systems into the `PairedSystemRegistry` at startup
+
+Every capability domain in subsequent phases checks the `PairedSystemRegistry` before taking any action. An agent that cannot look up a system by ID will never dispatch a command, no matter what arrives via FCM.
+
+---
+
+## 2. Constraints — Read These Before Writing a Single Line
+
+### Constraint 2.1: The Pairing Token Is In-Memory Only
+The QR code payload (the `PairingToken` entity) is parsed from the camera scan, validated, shown to the owner for confirmation, and then used in the registration call. It is **never written to any storage medium**. After `CompletePairingUseCase` runs — successfully or not — the token object goes out of scope and is garbage collected.
+
+**Why**: The token is a single-use credential. Storing it creates a window where an attacker with device access could replay the pairing. The token's only value is to authorize the initial key registration. Once that registration completes, the token is worthless.
+
+### Constraint 2.2: No Hardcoded Server URLs
+The `pairingEndpoint` URL comes from the QR token payload. It is stored in `SecureStorageService` as part of the `PairedSystem` record. No URL may appear as a string literal in any source file.
+
+**Why**: This is Axiom 9 and **CF-03**. Hardcoded URLs mean the app can only speak to one specific server deployment. This violates the multi-system requirement. Any future system must be able to pair simply by generating a QR code with its own endpoint — no code change required.
+
+### Constraint 2.3: Expired Tokens Stop Execution Immediately
+`PairingToken.isExpired` is checked as the first operation in `CompletePairingUseCase`. If the token is expired, the use case returns `Left(TokenExpiredFailure())` immediately. It does not attempt key generation, does not contact the server, and does not produce any side effect.
+
+**Why**: This is Axiom 10. An expired token means the pairing ceremony has a timing problem that the owner must resolve by generating a new QR. Proceeding with an expired token wastes network calls and produces a guaranteed server rejection — there is no recovery path to attempt.
+
+### Constraint 2.4: The Clean Architecture Layering Must Hold
+The domain layer (`lib/domain/pairing/`) must contain only pure Dart. No `Dio`, no `FlutterSecureStorage`, no `firebase_messaging`. The `PairingRepository` interface is defined in the domain; its implementation is in `lib/data/pairing/`.
+
+Check yourself with this rule: **if you need to import anything outside `lib/domain/` or `package:equatable` or `package:dartz` in a domain file, you are in the wrong layer.**
+
+### Constraint 2.5: The `PairedSystemRegistry` Is a Shared Dependency
+The `PairedSystemRegistry` is NOT a domain concept — it is an infrastructure concept that the FCM router (Phase 3), the HTTP client factory (Phase 3), and every capability handler (Phases 4–6) depend on. It lives in `lib/shared/domain/` as an interface and `lib/shared/data/` as an implementation.
+
+Its `reload()` method is called once at app startup in `main.dart`. After that, `register()` is called when a new pairing succeeds, and `unregister()` is called on unpair. It is never reconstructed — it is a long-lived singleton.
+
+### Constraint 2.6: Capabilities Are Strings, Not Enums, at This Layer
+The `PairedSystem.grantedCapabilities` is a `List<String>`. The canonical string values are defined in a `Capability` constants class (`lib/domain/pairing/value_objects/capability_grant.dart`). They are NOT an enum because new capabilities may be added by the server without a client code change.
+
+`Capability.isKnown(String value)` is a static helper that checks against the known set. An unknown capability string is ignored — it does not cause a failure. The server may send future capability IDs that this version of the app does not support; those are silently skipped.
+
+### Constraint 2.7: The Audit Log Is Written in the Use Case, Not the Repository
+`CompletePairingUseCase` writes the audit entry — not `PairingRepositoryImpl`. The use case owns the business outcome; it is the right place to record what happened. Repository implementations are data transport — they do not know whether an operation constitutes a business success or failure in context.
+
+---
+
+## 3. What to Build
+
+### Domain Layer: `lib/domain/pairing/`
+
+**`entities/pairing_token.dart`**
+Fields: `version` (String), `systemId` (String), `systemLabel` (String), `pairingEndpoint` (String), `token` (String), `expiresAt` (DateTime), `capabilities` (List\<String\>).
+Computed getter: `bool get isExpired` — compares `DateTime.now().toUtc()` against `expiresAt`.
+Extends `Equatable`. Props: `[systemId, token]`.
+This class is NEVER persisted. It lives only in memory during the pairing ceremony.
+
+**`entities/paired_system.dart`**
+Fields: `agentId` (String), `systemId` (String), `systemLabel` (String), `baseUrl` (String), `grantedCapabilities` (List\<String\>), `pairedAt` (DateTime).
+Method: `bool hasCapability(String capability)`.
+Extends `Equatable`. Props: `[agentId, systemId]`.
+This IS persisted — serialized to JSON and stored via `SecureStorageService`.
+
+**`value_objects/capability_grant.dart`**
+Abstract class `Capability` with three static string constants: `twoFa`, `otpGateway`, `paymentObservation`. Static method `bool isKnown(String value)`.
+
+**`repositories/pairing_repository.dart`**
+Define failure types: `TokenExpiredFailure`, `TokenInvalidFailure`, `RegistrationFailure`, `StorePairedSystemFailure` — all extending an abstract `PairingFailure`.
+Define the interface with these methods:
+- `Either<PairingFailure, PairingToken> parsePairingToken(String rawQrValue)` — synchronous, no network
+- `Future<Either<PairingFailure, PairedSystem>> registerWithServer(...)` — sends public key to server
+- `Future<Either<PairingFailure, void>> savePairedSystem(PairedSystem system)`
+- `Future<Either<PairingFailure, List<PairedSystem>>> loadPairedSystems()`
+- `Future<Either<PairingFailure, void>> removePairedSystem(String systemId)`
+
+**`use_cases/scan_pairing_token_use_case.dart`**
+Single `execute(String rawQrValue)` method. Validates the raw value is non-empty before delegating to the repository. Returns `Either<PairingFailure, PairingToken>`. If the QR value is empty, returns `Left(TokenInvalidFailure('QR value is empty'))` without calling the repository.
+
+**`use_cases/complete_pairing_use_case.dart`**
+Dependencies: `PairingRepository`, `SigningService`, `AuditLogService`.
+Sequence (in this exact order):
+1. Check `token.isExpired` → if true, log failure, return `Left(TokenExpiredFailure())`
+2. Call `signingService.generateKeyPair()` → if failure, log failure, return `Left`
+3. Call `signingService.getPublicKeyBase64()` → if failure, log failure, return `Left`
+4. Call `repository.registerWithServer(...)` → if failure, log failure, return `Left`
+5. Call `repository.savePairedSystem(...)` → if failure, log failure, return `Left`
+6. Log `pairingCompleted` with `success` outcome
+7. Return `Right(pairedSystem)`
+
+**`use_cases/unpair_system_use_case.dart`**
+Dependencies: `PairingRepository`, `AuditLogService`.
+Calls `removePairedSystem(systemId)`. Logs `unpairingCompleted` with outcome based on result. Returns the result.
+
+### Shared Layer Additions
+
+**`lib/shared/domain/paired_system_registry.dart`**
+Abstract interface: `findBySystemId(String systemId)` → `PairedSystem?`, `List<PairedSystem> get all`, `Future<void> reload()`, `void register(PairedSystem)`, `void unregister(String systemId)`.
+
+**`lib/shared/data/paired_system_registry_impl.dart`**
+Implements `PairedSystemRegistry`. Backed by an in-memory `Map<String, PairedSystem>`. `reload()` calls `PairingRepository.loadPairedSystems()` and repopulates the map. Registered as a singleton in DI.
+
+### Data Layer: `lib/data/pairing/`
+
+**`dtos/pairing_token_dto.dart`**
+Maps JSON → `PairingToken`. The JSON key names match the specification in `SERVER_CONTRACTS/` (snake_case). `toEntity()` returns a `PairingToken`. This DTO is used only inside `PairingRepositoryImpl.parsePairingToken()`.
+
+**`dtos/paired_system_dto.dart`**
+Maps JSON ↔ `PairedSystem`. `fromJson()` for deserializing server response and stored data. `toJson()` for persistence. `fromEntity()` static factory for serialization.
+
+**`repositories/pairing_repository_impl.dart`**
+Implements `PairingRepository`. Dependencies: `SecureStorageService`, `Dio` (an unauthenticated plain `Dio` instance — no signing interceptor, because at pairing time there is no agent identity yet).
+- `parsePairingToken`: parses JSON, delegates to `PairingTokenDto`, returns `TokenInvalidFailure` on any `FormatException` or missing required field
+- `registerWithServer`: POST to `{token.pairingEndpoint}/v1/pair`
+- Storage methods: read/write/delete the JSON list of `PairedSystem` objects under a fixed key in `SecureStorageService`
+
+### Presentation Layer: `lib/presentation/pairing/cubit/`
+
+**`pairing_state.dart`**
+States: `PairingIdle`, `PairingScanning`, `PairingTokenScanned(PairingToken token)`, `PairingInProgress`, `PairingSuccess(PairedSystem system)`, `PairingError(String message)`. All extend `Equatable`.
+
+**`pairing_cubit.dart`**
+Dependencies: `ScanPairingTokenUseCase`, `CompletePairingUseCase`, `UnpairSystemUseCase`, `PairedSystemRegistry`.
+Methods: `startScanning()`, `onQrScanned(String rawValue)`, `confirmPairing()`, `unpair(String systemId)`.
+No business logic in the Cubit — it calls use cases and translates `Either` results to state emissions.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why is `parsePairingToken` synchronous?**
+It does no I/O. It parses a JSON string already in memory. Making it async would be dishonest about its cost. The test for this method does not need `async`/`await`.
+
+**Why is the unauthenticated `Dio` acceptable in `PairingRepositoryImpl`?**
+This is the only case where a non-factory `Dio()` instance is used. At pairing time, the agent has no identity yet — there is no `agentId` or private key to sign with. The pairing endpoint is not authenticated by agent signature; it is authenticated by the one-time-use pairing token in the request body. After pairing, all subsequent calls use the signing interceptor. One raw `Dio()` in the pairing repo is the correct design.
+
+**Why is `PairedSystemRegistry` an interface in `lib/shared/domain/`?**
+Because the FCM router (Phase 3) and the HTTP client factory (Phase 3) both depend on it at the domain interface level. If it were a concrete class, those shared services would have a concrete dependency on an implementation detail. The interface allows those services to be tested with a mock registry.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+**`ScanPairingTokenUseCase` tests must prove:**
+- Empty string input returns `Left(TokenInvalidFailure)` without calling the repository
+- A valid JSON QR value returns the parsed `PairingToken` correctly
+- A JSON value with missing required fields returns `Left(TokenInvalidFailure)`
+
+**`parsePairingToken` (repository impl) tests must prove:**
+- Valid JSON with all required fields → `Right(PairingToken)`
+- JSON with expired `expires_at` → `Left(TokenExpiredFailure)`
+- Malformed JSON (not parseable) → `Left(TokenInvalidFailure)`
+- JSON missing `system_id` → `Left(TokenInvalidFailure)`
+
+**Architecture checks:**
+```bash
+# No Flutter in domain
+grep -r "package:flutter" lib/domain/pairing/
+# Expected: zero results
+
+# No Dio in domain
+grep -r "package:dio" lib/domain/pairing/
+# Expected: zero results
+
+# PairingRepositoryImpl is in data/, not domain/
+ls lib/domain/pairing/repositories/pairing_repository_impl.dart
+# Expected: No such file
+```
+
+**Do not proceed to Phase 3 until all tests pass and all grep checks return zero.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not store the `PairingToken` in `SecureStorageService` or SQLite at any point
+- ❌ Do not hardcode any server URL in any source file
+- ❌ Do not add business logic (expiry enforcement, retry decisions) to the Cubit
+- ❌ Do not implement `CompletePairingUseCase` steps out of the documented order
+- ❌ Do not write audit log entries from the repository — only from the use case
+- ❌ Do not import `PairedSystem` or pairing types into any other domain's files

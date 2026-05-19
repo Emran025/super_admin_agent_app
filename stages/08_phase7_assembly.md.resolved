@@ -1,0 +1,201 @@
+# Phase 7 — App Assembly, Routing, Dashboard & Security Hardening
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 6 verification must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+All three capabilities are built. The domain is correct. The tests pass per-phase. But a collection of correct components is not the same as a correct system. This phase assembles those components into an application the owner can actually use, verifies that the constitutional constraints hold across the entire codebase (not just within each phase's scope), and explicitly marks what remains to be done for native Android Keystore integration.
+
+This phase also performs the final security audit — the grep-based checks that prove the assembly did not accidentally introduce cross-layer pollution, hardcoded URLs, plaintext secrets, or confirmation semantics.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: Verify the Whole Before Adding the Assembly Layer
+Before writing any new code, run the full security checklist in Section 5. If any check fails, fix the violation first. Adding routing and navigation on top of a broken foundation will make the violations harder to find, not easier.
+
+### Constraint 2.2: The Global Navigator Key Is an Architectural Compromise
+The `GlobalKey<NavigatorState>` in `main.dart` is necessary for showing the 2FA approval dialog from inside `Auth2faFcmHandler`, which has no `BuildContext`. This is a pragmatic coupling between the infrastructure layer and the presentation layer that violates strict Clean Architecture. It is acceptable here because:
+- The alternative (a custom navigation event bus) adds significant complexity for one use case
+- The dependency is one-directional: the FCM handler depends on a global navigator key, not on any widget
+- It is documented as `// TODO(phase-7): extract to a NavigationService abstraction`
+
+Do not expand this pattern. The navigator key must be used only for the 2FA dialog. OTP and Payment Observation do not show a dialog — they run silently.
+
+### Constraint 2.3: The Dashboard Is a Status Display, Not a Control Panel
+The dashboard shows which systems are paired and which capabilities each system has. It does NOT show: current challenge status, OTP log entries, payment observation state. Those are runtime events handled invisibly by the FCM handlers.
+
+The dashboard has one active control: an unpair button (with confirmation) per system. No other controls are needed. Adding more controls risks turning the "dumb executor" into a "smart agent" — violating Axiom 1.
+
+### Constraint 2.4: The Initial Route Is Determined at Runtime by the Registry
+On cold start, if `PairedSystemRegistry.all` is empty → route to the pairing page. If any paired system exists → route to the dashboard. This logic lives in a single function in `main.dart`, not in a Cubit or use case. It is a presentation routing decision, not a business rule.
+
+### Constraint 2.5: Platform Channel Stubs Must Be Explicitly Marked
+Every Android native feature that is not yet implemented must have a `// TODO(phase-7-android):` comment in the calling Dart code. This phase collects all such TODOs in one place. The engineering AI responsible for the native Android layer will search for these markers.
+
+The complete list of unimplemented native features at the end of Phase 7:
+- Android Keystore hardware-backed signing (Kotlin `MethodChannel`)
+- `SmsManager` dual-SIM sending with `sentIntent`/`deliveredIntent` (Kotlin `MethodChannel`)
+- `BroadcastReceiver` for `SMS_RECEIVED` → `EventChannel`
+- `KeyguardManager.isDeviceSecure()` check for Stop Condition SC-10
+
+### Constraint 2.6: No Stop Condition May Remain Unverified
+Stop Conditions from `AGENT_BEHAVIOR/stop_conditions.md` must each have a verification: either a unit test that proves the condition causes the correct early exit, or a structural grep check that proves the enforcement code exists. SC-10 (no screen lock) is an exception — it requires native Android and is deferred with a `// TODO(phase-7-android):` marker.
+
+---
+
+## 3. What to Build
+
+### Step 1: Pre-Assembly Security Verification
+Run all checks in Section 5 before writing code. Fix any failure before proceeding.
+
+### Step 2: Runtime Permission Handler
+Create `lib/shared/infrastructure/permission_handler_service.dart`.
+Add `permission_handler: ^11.3.1` to `pubspec.yaml`.
+Static method `Future<Map<Permission, bool>> requestAll()` — requests SMS, phone, camera permissions and returns a map of permission → granted status. Called once in `main()` after `setupDependencies()`.
+Document: if SMS permission is denied, the OTP gateway capability will silently fail when attempting to send. The agent does not block startup for permission denial — it reports the failure at dispatch time.
+
+### Step 3: Global Navigator Key
+In `lib/main.dart`, declare: `final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();`
+Pass it to `MaterialApp(navigatorKey: navigatorKey, ...)`.
+Document with: `// TODO(phase-7): extract to NavigationService to reduce coupling`
+
+### Step 4: Update `Auth2faFcmHandler`
+Use the global navigator key to push the `ChallengeApprovalDialog` as a `MaterialPageRoute` with `fullscreenDialog: true`. Wrap the dialog in `BlocProvider.value(value: cubit, ...)`.
+
+### Step 5: 2FA Approval Dialog
+Build `lib/presentation/auth_2fa/widgets/challenge_approval_dialog.dart`.
+Rules:
+- Wrap entire dialog in `PopScope(canPop: false)` — no back-button dismissal. The owner must tap APPROVE or REJECT.
+- Display: `contextLabel`, `challengeId`, `expiresAt` (formatted). These three fields only — do not display system internals.
+- Two buttons: APPROVE and REJECT. Each calls `cubit.submitDecision(AgentDecision.approve/reject)`.
+- On `AuthChallengeSubmitted` state: pop the dialog.
+- On `AuthChallengeError` state: pop the dialog, show a `SnackBar`.
+- No auto-dismiss. No countdown timer visible in the UI (the server enforces expiry).
+
+### Step 6: Pairing Page
+Build `lib/presentation/pairing/pages/pairing_page.dart`.
+States handled:
+- `PairingIdle`: show "Pair with a System" button → calls `cubit.startScanning()`
+- `PairingScanning`: show QR scanner (`MobileScanner`) → on detect, call `cubit.onQrScanned(rawValue)`
+- `PairingTokenScanned`: show system label, capabilities list, endpoint URL, "Confirm and Pair" button → calls `cubit.confirmPairing()`
+- `PairingInProgress`: show loading indicator
+- `PairingSuccess`: navigate to `/dashboard`
+- `PairingError`: show `SnackBar` with message, return to `Idle`
+
+### Step 7: Dashboard Page
+Build `lib/presentation/dashboard/pages/dashboard_page.dart`.
+Reads `PairedSystemRegistry.all` directly from `GetIt` (not from a Cubit — the registry is already loaded).
+Shows a list of paired systems with: system label, agent ID, granted capabilities.
+Each item has an unpair icon button. Tapping it shows a confirmation dialog ("Are you sure you want to unpair [label]?"). On confirmation, calls `PairingCubit.unpair(systemId)` and updates the list.
+FAB navigates to `/pair`.
+
+### Step 8: Routing in `main.dart`
+Replace the placeholder `home:` with named routes:
+- `/` → determine initial page at runtime (pairing or dashboard)
+- `/pair` → `PairingPage` wrapped in `BlocProvider`
+- `/dashboard` → `DashboardPage`
+
+Add `_resolveInitialPage()` that checks `PairedSystemRegistry.all.isEmpty`.
+
+### Step 9: Stop Condition Audit
+For each Stop Condition, verify enforcement exists:
+
+| Stop Condition | Enforcement Location | Verification Method |
+|---|---|---|
+| SC-1: FCM from unknown system | `FcmMessageRouter.route()` | Unit test (Phase 3) |
+| SC-2: FCM for ungranted capability | `FcmMessageRouter.route()` | Unit test (Phase 3) |
+| SC-3: Command fetch fails | Cubit emits `Error` state | Unit test per capability (Phases 4–6) |
+| SC-4: QR payload invalid | `parsePairingToken()` → `Left` | Unit test (Phase 2) |
+| SC-5: Non-PENDING command | Status check in use cases | Unit test (Phases 4–6) |
+| SC-6: Signing fails | Use cases return `Left` on failure | Unit test (Phases 4–6) |
+| SC-7: Server rejects (HTTP 401) | Repo impls return `Left` | Manual integration test |
+| SC-8: Empty OTP body | Add `assert(messageBody.isNotEmpty)` in `OtpDispatchCommand` | Grep for assert |
+| SC-9: Parse returns null fields | Null-field report submitted | Unit test (Phase 6) |
+| SC-10: No screen lock | `// TODO(phase-7-android):` marker | Native Android phase |
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why is the dashboard stateless (no Cubit)?**
+The dashboard reads from `PairedSystemRegistry` which is already loaded and updated by the pairing/unpairing use cases. There is no async data loading needed at display time. A stateless widget reading from a singleton registry is simpler and less error-prone than a Cubit that mirrors the same data.
+
+**Why does the approval dialog pop on error, rather than staying open?**
+If submission fails, the challenge is still `pending` on the server (unless the server timed it out). A new FCM push would arrive and open a new dialog. Keeping the error dialog open would block the new one. Popping and showing a SnackBar allows recovery.
+
+---
+
+## 5. Security Checklist — Run Before AND After Assembly
+
+Every check must return zero results. If any returns non-zero, the violation must be fixed before declaring Phase 7 complete.
+
+```bash
+# CF-01: No plaintext secret storage
+grep -r "SharedPreferences\|prefs\.set\|prefs\.put" lib/
+# Expected: zero results
+
+# CF-03: No hardcoded URLs
+grep -rn "http://\|https://" lib/domain/ lib/data/
+# Expected: zero results
+
+# AF-01: No Flutter in domain
+grep -r "package:flutter" lib/domain/
+# Expected: zero results
+
+# AF-02: No cross-domain imports
+grep -r "import.*auth_2fa" lib/domain/otp_gateway/ lib/domain/payment_observation/
+grep -r "import.*otp_gateway" lib/domain/auth_2fa/ lib/domain/payment_observation/
+grep -r "import.*payment_observation" lib/domain/auth_2fa/ lib/domain/otp_gateway/
+# Expected: zero results for all three
+
+# Invariant: No raw SMS body in any persistent structure
+grep -r "rawBody\|smsBody\|rawSmsBody\|messageBody" lib/domain/otp_gateway/value_objects/ lib/domain/payment_observation/entities/ lib/domain/payment_observation/value_objects/
+# Expected: zero results
+
+# CF-04: No confirmation semantics in payment domain
+grep -r "isConfirmed\|isApproved\|isPaid" lib/domain/payment_observation/
+# Expected: zero results
+
+# Full static analysis
+flutter analyze
+# Expected: No issues found!
+
+# Full test suite
+flutter test test/ --coverage
+# Expected: All tests pass
+```
+
+---
+
+## 6. Remaining TODOs — Explicit List for Native Android Phase
+
+These must all be present as comments in the codebase at the end of Phase 7. If any is missing, add it now:
+
+```
+// TODO(phase-7-android): Implement Kotlin MethodChannel handler for Android Keystore hardware-backed signing
+// TODO(phase-7-android): Implement Kotlin MethodChannel handler for SmsManager with sentIntent/deliveredIntent PendingIntents
+// TODO(phase-7-android): Implement Kotlin BroadcastReceiver for SMS_RECEIVED → EventChannel to Flutter
+// TODO(phase-7-android): Implement KeyguardManager.isDeviceSecure() check via platform channel (SC-10)
+// TODO(phase-7): Extract global navigator key to a NavigationService abstraction
+// TODO(phase-7): Refactor AuthChallengeCubit DI to inject systemId at call time rather than placeholder
+// TODO(future): Hardware Keystore key rotation policy
+// TODO(future): Certificate pinning on Dio instances
+// TODO(future): Concurrent 2FA challenge handling for multi-system deployments
+// TODO(future): Log export endpoint wiring (send audit log to server on demand)
+```
+
+---
+
+## 7. What You Must NOT Do
+
+- ❌ Do not add any controls to the dashboard beyond pairing status display and unpair
+- ❌ Do not skip the pre-assembly security checklist
+- ❌ Do not add an auto-dismiss or countdown timer to the 2FA dialog
+- ❌ Do not use the global navigator key for anything other than the 2FA dialog
+- ❌ Do not declare Phase 7 complete if any security checklist grep returns non-zero
+- ❌ Do not remove any `// TODO(phase-7-android):` marker — these are handoff points for the native Android engineer
