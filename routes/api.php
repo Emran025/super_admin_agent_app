@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AgentReportController;
 use App\Http\Controllers\Api\BroadcastingAuthController;
 use App\Http\Controllers\Api\OtpCommandController;
 use App\Http\Controllers\Api\PairingController;
+use App\Http\Controllers\Api\PushChallengeController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -43,4 +44,6 @@ Route::prefix('v1')->group(function (): void {
 
     Route::get('/otp-commands/{commandId}', [OtpCommandController::class, 'show']);
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);
+
+    Route::post('/push-challenges/{challengeId}/respond', [PushChallengeController::class, 'respond']);
 });
