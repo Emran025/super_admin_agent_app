@@ -96,6 +96,29 @@ class SignatureVerifierService
         return $canonicalJson . "\n" . $nonce . "\n" . $reportedAt;
     }
 
+    /**
+     * Reconstructs the signing input from a 2FA push challenge response.
+     *
+     * Matches what the Flutter agent builds in RespondToPushChallengeUseCase:
+     *   CanonicalJson.encode({challenge_id, decision, nonce, decided_at})
+     *   + "\n" + nonce + "\n" + decided_at
+     */
+    public function buildPushChallengeSigningInput(
+        string $challengeId,
+        string $decision,
+        string $nonce,
+        string $decidedAt,
+    ): string {
+        $canonicalJson = CanonicalJsonService::encode([
+            'challenge_id' => $challengeId,
+            'decided_at'   => $decidedAt,
+            'decision'     => $decision,
+            'nonce'        => $nonce,
+        ]);
+
+        return $canonicalJson . "\n" . $nonce . "\n" . $decidedAt;
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
