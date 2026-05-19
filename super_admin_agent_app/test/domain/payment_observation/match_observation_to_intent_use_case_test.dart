@@ -9,10 +9,10 @@ void main() {
   late MatchObservationToIntentUseCase useCase;
 
   setUp(() {
-    useCase = MatchObservationToIntentUseCase();
+    useCase = const MatchObservationToIntentUseCase();
   });
 
-  PaymentObservationSession _session({String? expectedPayerName}) => PaymentObservationSession(
+  PaymentObservationSession createSession({String? expectedPayerName}) => PaymentObservationSession(
         sessionId: 'sess-1',
         systemId: 'sys-1',
         intentId: 'intent-1',
@@ -25,7 +25,7 @@ void main() {
         status: SessionStatus.active,
       );
 
-  BankSmsObservation _observation(String? payer, String? amt, String? curr) => BankSmsObservation(
+  BankSmsObservation createObservation(String? payer, String? amt, String? curr) => BankSmsObservation(
         observationId: 'obs-1',
         sessionId: 'sess-1',
         receivedAt: DateTime.now(),
@@ -36,8 +36,8 @@ void main() {
 
   test('all fields matching returns isMatch: true', () {
     final result = useCase.execute(
-      observation: _observation('John', '100.00', 'usd'),
-      session: _session(expectedPayerName: 'john'), // Case insensitive
+      observation: createObservation('John', '100.00', 'usd'),
+      session: createSession(expectedPayerName: 'john'), // Case insensitive
     );
 
     expect(result.isMatch, isTrue);
@@ -45,8 +45,8 @@ void main() {
 
   test('mismatched amount returns isMatch: false', () {
     final result = useCase.execute(
-      observation: _observation('John', '50.00', 'USD'),
-      session: _session(expectedPayerName: 'John'),
+      observation: createObservation('John', '50.00', 'USD'),
+      session: createSession(expectedPayerName: 'John'),
     );
 
     expect(result.isMatch, isFalse);
@@ -54,8 +54,8 @@ void main() {
 
   test('any null parsed field returns isMatch: false', () {
     final result = useCase.execute(
-      observation: _observation('John', null, 'USD'),
-      session: _session(expectedPayerName: 'John'),
+      observation: createObservation('John', null, 'USD'),
+      session: createSession(expectedPayerName: 'John'),
     );
 
     expect(result.isMatch, isFalse);
@@ -63,8 +63,8 @@ void main() {
 
   test('payer name match is skipped if session expectedPayerName is null', () {
     final result = useCase.execute(
-      observation: _observation('Anyone', '100.00', 'USD'),
-      session: _session(expectedPayerName: null),
+      observation: createObservation('Anyone', '100.00', 'USD'),
+      session: createSession(expectedPayerName: null),
     );
 
     expect(result.isMatch, isTrue);

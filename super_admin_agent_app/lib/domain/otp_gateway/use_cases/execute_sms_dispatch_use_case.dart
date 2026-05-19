@@ -57,12 +57,13 @@ class ExecuteSmsDispatchUseCase {
     final reportedAt = DateTime.now().toUtc();
     final nonce = _nonceGenerator.generate();
 
-    final signingInput = CanonicalJson.encode({
+    final jsonStr = CanonicalJson.encode({
       'command_id': command.commandId,
       'nonce': nonce,
       'reported_at': reportedAt.toIso8601String(),
       'status': deliveryStatus.name,
-    }) + '\n$nonce\n${reportedAt.toIso8601String()}';
+    });
+    final signingInput = '$jsonStr\n$nonce\n${reportedAt.toIso8601String()}';
 
     final signResult = await _signingService.sign(signingInput);
 

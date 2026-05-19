@@ -36,12 +36,13 @@ class RecordUserDecisionUseCase {
     final nonce = _nonceGenerator.generate(); // Fresh per call — Constraint 2.5.
 
     // Constraint 2.6: canonical signing input.
-    final signingInput = CanonicalJson.encode({
+    final jsonStr = CanonicalJson.encode({
       'challenge_id': challenge.challengeId,
       'decision': decision.name,
       'nonce': nonce,
       'responded_at': respondedAt.toIso8601String(),
-    }) + '\n$nonce\n${respondedAt.toIso8601String()}';
+    });
+    final signingInput = '$jsonStr\n$nonce\n${respondedAt.toIso8601String()}';
 
     final signResult = await _signingService.sign(signingInput);
 

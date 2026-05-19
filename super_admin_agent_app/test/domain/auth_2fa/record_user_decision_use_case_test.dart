@@ -29,7 +29,7 @@ void main() {
     when(() => signingService.publicKeyId).thenReturn('key-1');
   });
 
-  AuthChallenge _challenge(ChallengeStatus status) => AuthChallenge(
+  AuthChallenge createChallenge(ChallengeStatus status) => AuthChallenge(
         challengeId: 'chal-1',
         systemId: 'sys-1',
         issuedAt: DateTime.now(),
@@ -40,7 +40,7 @@ void main() {
 
   test('non-pending challenge returns ChallengeAlreadyRespondedException without signing', () async {
     final result = await useCase.execute(
-      challenge: _challenge(ChallengeStatus.responded),
+      challenge: createChallenge(ChallengeStatus.responded),
       decision: AgentDecision.approve,
     );
 
@@ -54,7 +54,7 @@ void main() {
     when(() => signingService.sign(any())).thenAnswer((_) async => const Right('sig-123'));
 
     final result = await useCase.execute(
-      challenge: _challenge(ChallengeStatus.pending),
+      challenge: createChallenge(ChallengeStatus.pending),
       decision: AgentDecision.reject,
     );
 
@@ -80,14 +80,14 @@ void main() {
     when(() => signingService.sign(any())).thenAnswer((_) async => const Right('sig'));
 
     final res1 = await useCase.execute(
-      challenge: _challenge(ChallengeStatus.pending),
+      challenge: createChallenge(ChallengeStatus.pending),
       decision: AgentDecision.approve,
     );
 
     when(() => nonceGenerator.generate()).thenReturn('nonce-2');
     
     final res2 = await useCase.execute(
-      challenge: _challenge(ChallengeStatus.pending),
+      challenge: createChallenge(ChallengeStatus.pending),
       decision: AgentDecision.approve,
     );
 

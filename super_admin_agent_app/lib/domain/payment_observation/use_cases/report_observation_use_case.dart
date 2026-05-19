@@ -48,7 +48,7 @@ class ReportObservationUseCase {
     final nonce = _nonceGenerator.generate();
 
     // Build canonical signing input.
-    final signingInput = CanonicalJson.encode({
+    final jsonStr = CanonicalJson.encode({
       'intent_id': session.intentId,
       'is_match': matchResult.isMatch,
       'nonce': nonce,
@@ -58,11 +58,12 @@ class ReportObservationUseCase {
       'parsed_payer_name': observation.parsedPayerName,
       'reported_at': reportedAt.toIso8601String(),
       'session_id': session.sessionId,
-    }) + '\n$nonce\n${reportedAt.toIso8601String()}';
+    });
+    final signingInput = '$jsonStr\n$nonce\n${reportedAt.toIso8601String()}';
 
     final signResult = await _signingService.sign(signingInput);
     if (signResult.isLeft()) {
-      return Left(ReportSubmissionFailure('Signing failed'));
+      return const Left(ReportSubmissionFailure('Signing failed'));
     }
 
     final signature = signResult.getOrElse(() => '');

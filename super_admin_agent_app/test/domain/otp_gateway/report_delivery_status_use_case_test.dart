@@ -33,7 +33,7 @@ void main() {
     when(() => auditLogService.log(any())).thenAnswer((_) async => const Right(null));
   });
 
-  final _report = SmsDeliveryReport(
+  final testReport = SmsDeliveryReport(
     commandId: 'cmd-1',
     status: SmsDeliveryStatus.failedNoService,
     reportedAt: DateTime.now(),
@@ -46,7 +46,7 @@ void main() {
     when(() => repository.submitDeliveryReport(report: any(named: 'report'), systemId: any(named: 'systemId')))
         .thenAnswer((_) async => const Right(null));
 
-    await useCase.execute(report: _report, systemId: 'sys-1');
+    await useCase.execute(report: testReport, systemId: 'sys-1');
 
     final captured = verify(() => auditLogService.log(captureAny())).captured;
     expect(captured.length, 2);

@@ -37,7 +37,7 @@ void main() {
     when(() => signingService.publicKeyId).thenReturn('key-1');
   });
 
-  OtpDispatchCommand _command(DispatchStatus status) => OtpDispatchCommand(
+  OtpDispatchCommand createCommand(DispatchStatus status) => OtpDispatchCommand(
         commandId: 'cmd-1',
         systemId: 'sys-1',
         recipientPhoneNumber: '+1234567890',
@@ -48,7 +48,7 @@ void main() {
       );
 
   test('non-pending command returns CommandAlreadyDispatchedFailure without sending SMS', () async {
-    final result = await useCase.execute(_command(DispatchStatus.dispatched));
+    final result = await useCase.execute(createCommand(DispatchStatus.dispatched));
 
     expect(result, const Left(CommandAlreadyDispatchedFailure()));
     verifyNever(() => smsSenderService.send(
@@ -67,7 +67,7 @@ void main() {
     when(() => nonceGenerator.generate()).thenReturn('nonce-1');
     when(() => signingService.sign(any())).thenAnswer((_) async => const Right('sig-1'));
 
-    final result = await useCase.execute(_command(DispatchStatus.pending));
+    final result = await useCase.execute(createCommand(DispatchStatus.pending));
 
     expect(result.isRight(), isTrue);
     final report = result.getOrElse(() => throw Exception());

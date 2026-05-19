@@ -14,8 +14,7 @@ use Illuminate\Support\Facades\Hash;
  * - otp_hash is ALWAYS a bcrypt hash produced by Hash::make(). Plaintext '123456'
  *   is used only as the known test value so tests can call Hash::check('123456', $hash).
  * - Plaintext '123456' is NEVER stored in any column. If you add a column and
- *   accidentally store the plaintext, the Phase 10 CI security gate will catch it
- *   via the grep check: grep -r "plaintext\|raw_otp\|otp_plain" database/factories.
+ *   accidentally store the plaintext, the Phase 10 CI security gate will catch it.
  *
  * Usage in tests:
  *   $dispatch = OtpDispatch::factory()->create();

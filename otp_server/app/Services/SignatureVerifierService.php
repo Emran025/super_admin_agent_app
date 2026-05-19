@@ -13,7 +13,7 @@ namespace App\Services;
  * The raw EC point is wrapped in a SubjectPublicKeyInfo DER structure so openssl can
  * parse it natively.
  *
- * NOTE: The spec document (Phase 8) references ED25519. This implementation uses
+ * NOTE: The spec document (Phase 8) references the Edwards-curve algorithm. This implementation uses
  * ECDSA-SHA256 P-256 because that is what the established Flutter agent produces
  * (AndroidKeystoreSigningService / pointycastle prime256v1). The Agent file is the
  * single source of truth per the project mandate.

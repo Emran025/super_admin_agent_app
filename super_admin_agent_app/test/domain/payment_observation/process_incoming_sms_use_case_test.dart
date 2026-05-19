@@ -20,7 +20,7 @@ void main() {
     );
   });
 
-  PaymentObservationSession _session(SessionStatus status) => PaymentObservationSession(
+  PaymentObservationSession createSession(SessionStatus status) => PaymentObservationSession(
         sessionId: 'sess-1',
         systemId: 'sys-1',
         intentId: 'intent-1',
@@ -35,7 +35,7 @@ void main() {
   test('SMS from wrong sender returns null without parsing', () {
     final result = useCase.execute(
       event: RawSmsEvent(senderName: 'OTHER', body: 'Payment', receivedAt: DateTime.now()),
-      session: _session(SessionStatus.active),
+      session: createSession(SessionStatus.active),
     );
 
     expect(result, isNull);
@@ -48,7 +48,7 @@ void main() {
   test('SMS when session is not active returns null without parsing', () {
     final result = useCase.execute(
       event: RawSmsEvent(senderName: 'BANK', body: 'Payment', receivedAt: DateTime.now()),
-      session: _session(SessionStatus.expired),
+      session: createSession(SessionStatus.expired),
     );
 
     expect(result, isNull);
@@ -70,7 +70,7 @@ void main() {
 
     final result = useCase.execute(
       event: RawSmsEvent(senderName: 'bank', body: 'Payment from John 100.00 USD', receivedAt: DateTime.now()),
-      session: _session(SessionStatus.active),
+      session: createSession(SessionStatus.active),
     );
 
     expect(result, isNotNull);
@@ -97,7 +97,7 @@ void main() {
 
     final result = useCase.execute(
       event: RawSmsEvent(senderName: 'bank', body: 'Unrelated message', receivedAt: DateTime.now()),
-      session: _session(SessionStatus.active),
+      session: createSession(SessionStatus.active),
     );
 
     expect(result, isNotNull);

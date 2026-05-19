@@ -34,7 +34,7 @@ void main() {
     when(() => auditLogService.log(any())).thenAnswer((_) async => const Right(null));
   });
 
-  final _response = SignedChallengeResponse(
+  final testResponse = SignedChallengeResponse(
     challengeId: 'chal-1',
     decision: AgentDecision.approve,
     respondedAt: DateTime.now(),
@@ -47,7 +47,7 @@ void main() {
     when(() => repository.submitResponse(response: any(named: 'response'), systemId: any(named: 'systemId')))
         .thenAnswer((_) async => const Right(null));
 
-    await useCase.execute(response: _response, systemId: 'sys-1');
+    await useCase.execute(response: testResponse, systemId: 'sys-1');
 
     final captured = verify(() => auditLogService.log(captureAny())).captured;
     expect(captured.length, 2);
@@ -64,7 +64,7 @@ void main() {
     when(() => repository.submitResponse(response: any(named: 'response'), systemId: any(named: 'systemId')))
         .thenAnswer((_) async => const Left(ChallengeSubmissionFailure('err')));
 
-    final result = await useCase.execute(response: _response, systemId: 'sys-1');
+    final result = await useCase.execute(response: testResponse, systemId: 'sys-1');
     expect(result.isLeft(), isTrue);
 
     final captured = verify(() => auditLogService.log(captureAny())).captured;
