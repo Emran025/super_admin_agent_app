@@ -1,0 +1,105 @@
+# Phase 10 — Laravel Test Automation & CI/CD Pipeline
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 8 (Laravel OTP Server Testbed) must be fully implemented.**
+
+---
+
+## 1. Why This Phase Exists
+
+A zero-trust cryptographic backend is useless if its security guarantees degrade over time. Phase 8 established the logic for OTP generation and ED25519 signature verification. This phase solidifies those guarantees by introducing rigorous Laravel factory-driven testing and an automated GitHub Actions CI/CD pipeline. 
+
+The goal is to ensure that every future commit is automatically proven against our core security axioms: no plaintext secrets, strict signature enforcement, and perfect idempotency.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: Factories Must Not Leak Plaintext by Default (Invariant 3)
+When creating the `OtpDispatchFactory`, the `otp_hash` field must default to a hashed value, never plaintext. If a test requires knowledge of the underlying plaintext OTP for frontend testing, the test must explicitly pass the plaintext and hash it at creation time. The factory definition itself must remain secure.
+
+### Constraint 2.2: Cryptographic Mocking Must Be Deterministic
+Testing the `SignatureVerifierService` requires generating valid ED25519 keypairs and deterministic nonces. Tests must use a static, known-good keypair when testing the webhook endpoint to ensure CI stability. Randomly generating keypairs in every test loop can lead to flaky tests.
+
+### Constraint 2.3: CI Must Block Unsafe Code
+The GitHub Actions workflow must be configured to fail the build if any of the Phase 8 security grep checks (e.g., plaintext OTP storage) return violations. The CI pipeline is the final enforcement gate for our zero-trust constraints.
+
+---
+
+## 3. What to Build
+
+### Step 1: Model Factories
+Create factories for the Phase 8 models to enable rapid test state generation.
+**`AgentFactory.php`**
+- `system_id`: `$this->faker->uuid()`
+- `agent_id`: `$this->faker->uuid()`
+- `agent_public_key`: A deterministic, hardcoded valid ED25519 public key (hex or base64) for testing.
+- `fcm_token`: `$this->faker->md5()`
+- `capabilities`: `['otp_gateway']`
+
+**`OtpDispatchFactory.php`**
+- `user_id`: Factory relationship to `UserFactory`
+- `phone_number`: `$this->faker->e164PhoneNumber()`
+- `otp_hash`: `Hash::make('123456')`
+- `status`: `pending`
+- `expires_at`: `now()->addMinutes(5)`
+
+### Step 2: Precision Feature Tests
+Create `tests/Feature/AgentReportWebhookTest.php`. Use the factories to construct the state, then prove the following:
+1. **Valid Signature:** Construct a canonical JSON payload, sign it using the deterministic private key matching the `AgentFactory` public key, POST it to the webhook, and assert `200 OK` and database status update.
+2. **Invalid Signature:** Mutate the payload slightly after signing, POST it, and assert `401 Unauthorized` and no database mutation.
+3. **Nonce Replay Attack:** POST a valid signed payload, then POST the exact same payload again. Assert the second request returns `401 Unauthorized` or `409 Conflict`.
+4. **Unknown Agent:** POST a valid signed payload but for a `system_id` that does not exist in the `agents` table. Assert `401 Unauthorized`.
+
+### Step 3: GitHub Actions Workflow
+Create `.github/workflows/laravel-ci.yml`.
+Configure the workflow to run on push to `main` and on pull requests.
+**Jobs:**
+1. **Setup & PHPUnit:** Checkout code, install Composer dependencies, copy `.env.example` to `.env`, generate app key, run `php artisan migrate:fresh`, and execute `php artisan test`.
+2. **Security Gate (Architecture Checks):**
+   Execute the exact grep checks defined in Phase 8. If `grep` finds a violation, `exit 1` to fail the build.
+   - Example step:
+     ```yaml
+     - name: Enforce No Plaintext OTP Storage
+       run: |
+         if grep -r "otp_code\|plaintext_otp" database/migrations/; then
+           echo "Security Violation: Plaintext OTP column found!"
+           exit 1
+         fi
+     ```
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why deterministic keys in the AgentFactory?**
+ED25519 signature generation is fast, but generating a new keypair for every test case adds unnecessary overhead and makes debugging test failures difficult. By using a known-good static keypair in the factory, you can hardcode expected signatures for edge-case testing without worrying about runtime generation flakiness.
+
+**Why grep in the CI pipeline?**
+PHPUnit tests verify behavior, but they don't easily verify structural constraints (like "do not name a column `otp_code`"). Adding static analysis via `grep` directly into GitHub Actions creates an unbreakable security gate.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+Before completing this phase, run the pipeline locally:
+
+```bash
+# 1. Run the factory-driven test suite
+php artisan test --filter AgentReportWebhookTest
+# Expected: All precision security tests PASS
+
+# 2. Simulate the CI Security Gate
+grep -r "otp_code\|plaintext_otp" database/migrations/
+# Expected: Zero results (Exit code 1 from grep)
+```
+
+**Verify GitHub Actions:**
+Commit the workflow file to a branch and push. Verify in the GitHub Actions tab that the pipeline runs, the SQLite database is correctly initialized in the runner, and the tests pass.
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not write tests that manually use `DB::insert()`. You MUST use the Laravel Factories (`Agent::factory()->create()`).
+- ❌ Do not use real database credentials or external FCM keys in the GitHub Actions workflow. The tests must run entirely in isolation using mock APIs and an in-memory or SQLite file database.
+- ❌ Do not skip the `Nonce Replay Attack` test. It is the most critical proof of idempotency in the webhook.

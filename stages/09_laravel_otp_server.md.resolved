@@ -1,0 +1,130 @@
+# Phase 8 — Laravel OTP Server Testbed
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: You must be operating in a fresh Laravel 11 workspace, entirely separate from the Flutter mobile agent project.**
+
+---
+
+## 1. Why This Phase Exists
+
+To prove that the mobile agent's OTP Gateway capability actually works, it needs a real server to pair with and receive FCM commands from. This phase builds that server using Laravel. 
+
+The server's job is to act as the "Client" to the mobile agent's "Gateway". It registers the agent, generates an OTP, dispatches it via Firebase Cloud Messaging (FCM), and exposes a webhook to receive the cryptographically signed delivery report. Crucially, the server does not send the SMS itself — it relies entirely on the zero-trust mobile agent to do so.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: The Agent Signature is the Sole Source of Trust (Invariant 1)
+When the webhook (`POST /v1/otp-commands/{commandId}/report`) is hit, the server MUST NOT trust the payload until the ED25519 signature is verified against the agent's registered public key. If the signature is invalid, missing, or if the `nonce` has been used before, the server must return `HTTP 401 Unauthorized` and discard the report.
+
+### Constraint 2.2: State Mutates Only on Cryptographic Proof (Invariant 2)
+The database status of an OTP dispatch (`pending` -> `delivered` or `failed`) changes *only* when a valid, signed `SmsDeliveryReport` is received via the webhook. It never changes based on assumptions or timeouts (though timeouts may mark it expired, they do not mark it delivered).
+
+### Constraint 2.3: No Plaintext Secrets (Axiom 3)
+The 6-digit OTP code must be stored hashed in the database (`Hash::make()` or SHA-256). The plaintext OTP is passed in the FCM payload exactly once and then discarded from server memory. If the database is dumped, the OTPs must not be readable.
+
+### Constraint 2.4: Strict Contract Adherence
+The JSON payload sent via FCM must perfectly match the `OtpDispatchCommand` structure expected by the mobile agent. Any deviation in field names (`command_id` vs `commandId`) will cause the agent to reject the message (Stop Condition SC-1).
+
+---
+
+## 3. What to Build
+
+### Step 1: Scaffold & Authentication
+**`laravel new otp-server`** (if not already done).
+Install Laravel Breeze (Blade or Livewire) to provide the base login and registration views.
+Configure SQLite or MySQL in `.env`.
+
+### Step 2: Database Layer
+**`create_agents_table.php`**
+Fields: `id`, `system_id` (string, the UUID of this server), `agent_id` (string), `agent_public_key` (text, hex or base64), `fcm_token` (string), `capabilities` (json), `paired_at` (timestamp).
+
+**`create_otp_dispatches_table.php`**
+Fields: `id` (uuid, primary), `user_id` (foreign key), `phone_number` (string), `otp_hash` (string), `status` (enum: `pending`, `dispatched`, `delivered`, `failed`), `expires_at` (timestamp).
+
+### Step 3: Pairing Stub (CLI)
+Create an Artisan command: `php artisan agent:register {agent_id} {public_key} {fcm_token}`.
+Since we haven't built the dynamic QR pairing server yet, this command manually inserts a trusted agent into the `agents` table so the server has a valid FCM token and public key to test with.
+
+### Step 4: OTP Dispatch Service
+Create `app/Services/OtpDispatchService.php`.
+Install an FCM package (e.g., `kreait/laravel-firebase`).
+Method `dispatch(User $user, string $phoneNumber)`:
+1. Generates a 6-digit code.
+2. Hashes it and saves to `otp_dispatches` with status `pending`.
+3. Constructs the FCM payload.
+4. Pushes the FCM data message to the agent's `fcm_token`.
+5. Updates status to `dispatched`.
+
+**FCM Payload Contract:**
+```json
+{
+  "data": {
+    "capability": "otp_gateway",
+    "command_id": "<UUID of otp_dispatches record>",
+    "system_id": "<System ID from agents table>",
+    "recipient_phone_number": "+1234567890",
+    "message_body": "Your verification code is 123456. Do not share.",
+    "issued_at": "2026-05-19T10:00:00Z",
+    "sim_slot": "defaultSlot"
+  }
+}
+```
+
+### Step 5: Webhook & Signature Verification
+Create `app/Http/Controllers/Api/AgentReportController.php`.
+Route: `POST /api/v1/otp-commands/{commandId}/report`.
+Implement signature verification using an ED25519 library (e.g., `kornrunner/ed25519` or `sodium_crypto_sign_verify_detached`).
+1. Reconstruct the canonical JSON: `{"command_id":"...","nonce":"...","reported_at":"...","status":"..."}`. Note: keys must be sorted alphabetically.
+2. Append `\n{nonce}\n{reported_at}` to the JSON string.
+3. Verify against `agent_public_key`.
+4. If valid, update the `otp_dispatches` status based on the payload status (`sent`/`delivered` -> `delivered`, `failed*` -> `failed`).
+
+### Step 6: Frontend Integration
+Modify the Breeze Registration/Login controllers.
+1. After entering credentials, intercept the flow and redirect to a "Verify Phone" route.
+2. Call `OtpDispatchService::dispatch()`.
+3. Create a view with a 6-digit input.
+4. On submit, verify the input against `otp_dispatches.otp_hash`. If valid and not expired/failed, log the user in.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why does the server generate the OTP instead of the agent?**
+The agent is a dumb executor. If the agent generated the OTP, the server wouldn't know what it is, and couldn't verify the user's input. The server holds the state; the agent only provides the secure transmission pipeline.
+
+**Why verify the signature manually instead of using Laravel middleware?**
+The ED25519 canonical JSON signing protocol is bespoke to this zero-trust architecture. Standard Laravel API token middleware does not understand it. A custom service or dedicated middleware is required to enforce Invariant 1.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+Write PHPUnit tests to prove the following:
+
+- **Signature Verification:** A webhook request with an invalid signature is rejected with HTTP 401.
+- **Expiry Enforcement:** A valid OTP submitted by the user after `expires_at` is rejected.
+- **Idempotency:** Replaying a valid webhook request with the same `nonce` is rejected.
+
+**Architecture Checks:**
+```bash
+# No plaintext OTP column definitions
+grep -r "otp_code\|plaintext_otp" database/migrations/
+# Expected: zero results (must use otp_hash)
+
+# Signature verification is enforced on the report route
+grep -r "SignatureVerifier\|sodium_crypto_sign_verify_detached" app/Http/Controllers/Api/AgentReportController.php
+# Expected: matches found
+```
+
+**Do not proceed to the next milestone until all tests pass and all grep checks return the expected results.**
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not store the 6-digit OTP in plaintext in the database.
+- ❌ Do not update the dispatch status to 'delivered' until the verified webhook is received.
+- ❌ Do not integrate Twilio or AWS SNS. The agent via FCM is the ONLY allowed delivery mechanism.
+- ❌ Do not skip the canonical JSON sorting when verifying the signature; if keys are out of order, the signature will fail.

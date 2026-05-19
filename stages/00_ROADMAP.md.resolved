@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Each file in this artifact set (`Phase 0` through `Phase 7`) is a **complete, self-contained prompt** ready to be copy-pasted into an engineering AI. Execute them **strictly in order**. Do not begin a phase until all verification steps of the previous phase pass.
+Each file in this artifact set (`Phase 0` through `Phase 10`) is a **complete, self-contained prompt** ready to be copy-pasted into an engineering AI. Execute them **strictly in order**. Do not begin a phase until all verification steps of the previous phase pass.
 
 ---
 
@@ -28,6 +28,8 @@ Each file in this artifact set (`Phase 0` through `Phase 7`) is a **complete, se
 | **Phase 5** | SMS OTP Gateway capability | Full Domain → Data → Presentation for OTP |
 | **Phase 6** | Payment Observation capability | Full Domain → Data → Presentation for Payment |
 | **Phase 7** | App assembly + hardening | Routing, dashboard, DI wiring, stop-condition enforcement, security checklist |
+| **Phase 8** | Laravel OTP testbed server | Webhook verification, FCM dispatch, database scaffolding |
+| **Phase 10** | Laravel testing & CI/CD | Model factories, security pipeline, replay attack prevention |
 
 ---
 
