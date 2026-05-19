@@ -1,4 +1,4 @@
-# Phase 3 — Shared Infrastructure: HTTP Client, FCM Router, DI Bootstrap
+# Phase 3 — Shared Infrastructure: HTTP Client, WebSocket Router, DI Bootstrap
 
 > **Copy-paste this entire block into your engineering AI.**
 > **Prerequisite: Phase 2 verification must be 100% complete.**
@@ -7,13 +7,17 @@
 
 ## 1. Why This Phase Exists
 
-Phases 4, 5, and 6 each build a capability that must speak to a server and respond to FCM push messages. Without the infrastructure built in this phase, all three capabilities would need to reinvent the same networking and routing logic — duplicating the signing interceptor, duplicating the registry check, duplicating the DI wiring. Duplication in security-critical infrastructure is dangerous because it creates divergent behaviors.
+Phases 4, 5, and 6 each build a capability that must speak to a server and respond to server-pushed commands over a persistent WebSocket connection. Without the infrastructure built in this phase, all three capabilities would need to reinvent the same networking and routing logic — duplicating the signing interceptor, duplicating the registry check, duplicating the DI wiring. Duplication in security-critical infrastructure is dangerous because it creates divergent behaviors.
 
-This phase establishes three shared services that all capability phases depend on:
+This phase establishes four shared services that all capability phases depend on:
 
 1. **HTTP Client Factory** — produces authenticated `Dio` instances, with signing built in, for a specific paired system. The signing interceptor lives here and nowhere else.
-2. **FCM Message Router** — receives all incoming push messages and dispatches them to the correct capability handler. Unknown systems and ungranted capabilities are rejected here, before any handler is invoked.
-3. **DI Bootstrap** — wires all shared services and the pairing module. Capability modules are stubbed with `// TODO` markers; they will be filled in Phases 4–6.
+2. **WebSocket Message Router (`WsMessageRouter`)** — receives all incoming WebSocket command events and dispatches them to the correct capability handler. Unknown systems and ungranted capabilities are rejected here, before any handler is invoked.
+3. **Agent WebSocket Service (`AgentWebSocketService`)** — maintains a persistent, authenticated connection to the self-hosted Reverb WebSocket server. Implements the Pusher protocol (which Reverb uses) for private channel subscription and auto-reconnects on failure.
+4. **Agent Foreground Service (`AgentForegroundService`)** — wraps the WebSocket service in an Android Foreground Service with a persistent notification, keeping the connection alive through Android Doze mode indefinitely without Google push infrastructure.
+5. **DI Bootstrap** — wires all shared services and the pairing module. Capability modules are stubbed with `// TODO` markers; they will be filled in Phases 4–6.
+
+**Architectural note**: This system is entirely self-hosted. There is no Firebase, no Google Play Services, no FCM. Command delivery from the server to the agent uses [Laravel Reverb](https://reverb.laravel.com/) — a first-party self-hosted WebSocket server implementing the Pusher protocol.
 
 ---
 
@@ -36,14 +40,14 @@ Every `Dio` instance produced by `HttpClientFactory` has exactly one `_AgentSign
 
 If signing fails, the interceptor calls `handler.reject()` with a `DioException`. The request is never sent. This is **CF-02** prevention at the infrastructure level.
 
-### Constraint 2.3: The FCM Router Enforces Two Stop Conditions Before Dispatching
-`FcmMessageRouter.route(RemoteMessage)` must perform exactly these checks in this order:
-1. All three required fields present in `message.data`: `capability`, `command_id`, `system_id`. If any is missing → log `unknownCommandRejected` + stop.
+### Constraint 2.3: The WebSocket Router Enforces Four Stop Conditions Before Dispatching
+`WsMessageRouter.route(Map<String, dynamic> data)` must perform exactly these checks in this order:
+1. All three required fields present in the event payload: `capability`, `command_id`, `system_id`. If any is missing → log `unknownCommandRejected` + stop.
 2. `system_id` is in `PairedSystemRegistry`. If not → log `unknownCommandRejected` + stop. (**CF-03**)
 3. `capability` is in `system.grantedCapabilities`. If not → log `unknownCommandRejected` + stop. (**CF-05**)
 4. A handler is registered for `capability`. If not → log `unknownCommandRejected` + stop. (**Axiom 10**)
 
-Only after all four checks pass is `handler.handle()` called. The handler receives only `commandId` and `systemId` — it never receives the raw `RemoteMessage`.
+Only after all four checks pass is `handler.handle()` called. The handler receives only `commandId` and `systemId` — it never receives the raw WebSocket message map.
 
 ### Constraint 2.4: Canonical JSON Has a Precise Definition
 The canonical JSON serialization used for signing input must: sort all keys alphabetically at every nesting level, use UTF-8 encoding, produce no trailing whitespace, and produce no pretty-printing. This must be a shared utility (`CanonicalJson.encode(Map<String, dynamic>)`) used consistently by all three capability signing paths. A different serialization in any one capability will produce signatures that fail server verification.
@@ -51,8 +55,8 @@ The canonical JSON serialization used for signing input must: sort all keys alph
 ### Constraint 2.5: DI Modules Are Per-Capability
 Do not register all services in a single flat function. Pairing services are registered in the pairing module function. Shared infrastructure is registered in the app module function. Capability registrations are left as `// TODO(phase-N):` comments — they must be present as comments so Phase N knows exactly where to add registrations.
 
-### Constraint 2.6: The Background FCM Handler Is a Top-Level Function
-Firebase Messaging requires the background message handler to be annotated with `@pragma('vm:entry-point')` and be a top-level function (not a method). In Phase 3, this function initializes Firebase and returns. The actual routing logic (`FcmMessageRouter.route()`) is not called from the background handler yet because DI is not available in the background isolate. This is documented as `// TODO(phase-7):`.
+### Constraint 2.6: The Foreground Service Is the Background Execution Strategy
+Android Doze mode (API 23+) suspends network connections for background apps. There is no Firebase fallback. The `AgentForegroundService` must start immediately in `main()` before `runApp()`, display a persistent notification ("Agent is running — listening for commands"), and run in foreground mode so the OS never kills the WebSocket connection. The `@pragma('vm:entry-point')` annotation is required on the service entry point to survive tree-shaking.
 
 ---
 
@@ -67,12 +71,25 @@ Method: `Dio forSystem(String systemId)` — looks up the system, throws `Argume
 
 Internal class `_AgentSigningInterceptor extends Interceptor`. Overrides `onRequest`. Builds the signing input, calls `signingService.sign()`, adds headers. On signing failure, calls `handler.reject(DioException(...))`.
 
-### `lib/shared/infrastructure/fcm_message_router.dart`
+### `lib/shared/infrastructure/ws_message_router.dart`
 Abstract class `CapabilityCommandHandler` with one method: `Future<void> handle({required String commandId, required String systemId})`.
 
-Class `FcmMessageRouter`. Constructor dependencies: `PairedSystemRegistry`, `AuditLogService`. Method `void registerHandler(String capabilityId, CapabilityCommandHandler handler)`. Method `Future<void> route(RemoteMessage message)` — implements the four-check sequence described in Constraint 2.3 above.
+Class `WsMessageRouter`. Constructor dependencies: `PairedSystemRegistry`, `AuditLogService`. Method `void registerHandler(String capabilityId, CapabilityCommandHandler handler)`. Method `Future<void> route(Map<String, dynamic> data)` — implements the four-check sequence described in Constraint 2.3 above.
 
-Constant class `CapabilityId` with three string constants matching those in `Capability` value object from Phase 2.
+Constant class `CapabilityId` with three string constants: `twoFa = 'two_fa'`, `otpGateway = 'otp_gateway'`, `paymentObservation = 'payment_observation'`.
+
+### `lib/shared/infrastructure/agent_websocket_service.dart`
+Class `AgentWebSocketService`. Constructor dependencies: `WsMessageRouter`, `PairedSystemRegistry`, `SecureStorageService`.
+
+Implements the Pusher WebSocket protocol to connect to the Reverb server:
+1. Reads `reverb_host`, `reverb_port`, `reverb_app_key` from secure storage (written by `PairingRepositoryImpl` during pairing).
+2. Connects to `ws://{host}:{port}/app/{appKey}?protocol=7&client=flutter-agent&version=1.0`.
+3. On `pusher:connection_established` → extracts `socket_id`, calls `_subscribeToPrivateChannel(systemId)`.
+4. Channel subscription: POSTs `{socket_id, channel_name}` to `/api/v1/broadcasting/auth` with ECDSA signing headers, receives `{auth}` token, sends `pusher:subscribe`.
+5. On `agent.command` event → decodes payload and calls `WsMessageRouter.route(data)`.
+6. On disconnect or error → exponential back-off reconnect (2s, 4s, 8s… up to 60s).
+
+Class `AgentForegroundService`. Static method `Future<void> init()` — configures `FlutterBackgroundService` with foreground mode, persistent notification, and auto-start on boot. The `@pragma('vm:entry-point')` annotated `_onStart` callback runs in a separate isolate.
 
 ### `lib/di/app_module.dart`
 A top-level `Future<void> setupDependencies()` function. Registers in this order:
@@ -84,36 +101,39 @@ A top-level `Future<void> setupDependencies()` function. Registers in this order
 6. `PairingRepository` → `PairingRepositoryImpl` (with an unauthenticated `Dio()`)
 7. `PairedSystemRegistry` → `PairedSystemRegistryImpl`
 8. `HttpClientFactory`
-9. `FcmMessageRouter`
-10. Pairing use cases and `PairingCubit`
-11. `// TODO(phase-4): Register 2FA module bindings`
-12. `// TODO(phase-5): Register OTP Gateway module bindings`
-13. `// TODO(phase-6): Register Payment Observation module bindings`
+9. `WsMessageRouter`
+10. `AgentWebSocketService`
+11. Pairing use cases and `PairingCubit`
+12. `// TODO(phase-4): Register 2FA module bindings`
+13. `// TODO(phase-5): Register OTP Gateway module bindings`
+14. `// TODO(phase-6): Register Payment Observation module bindings`
 
 ### Update `lib/main.dart`
-Add a top-level background FCM handler function (annotated `@pragma('vm:entry-point')`).
 `main()` must initialize in this order:
 1. `WidgetsFlutterBinding.ensureInitialized()`
-2. `await Firebase.initializeApp()`
-3. Register background handler
-4. `await SqliteAuditLogService.instance.init()`
-5. `await setupDependencies()`
-6. `await getIt<PairedSystemRegistry>().reload()`
-7. Register foreground FCM handler: `FirebaseMessaging.onMessage.listen((msg) => getIt<FcmMessageRouter>().route(msg))`
+2. `await AgentForegroundService.init()` — starts the foreground service (Doze protection)
+3. `await SqliteAuditLogService.init()`
+4. `await setupDependencies()`
+5. `await getIt<PairedSystemRegistry>().reload()`
+6. Register capability handlers with `WsMessageRouter`
+7. `await getIt<AgentWebSocketService>().connect()` — opens the WebSocket
 8. `runApp(...)`
 
 ---
 
 ## 4. Key Design Decisions to Understand
 
+**Why replace FCM with WebSockets + Foreground Service?**
+Firebase Cloud Messaging is a third-party service operated by Google. This violates the core constitutional axiom of the system: zero reliance on external infrastructure. A self-hosted Reverb WebSocket server provides equivalent real-time push delivery with no external dependency. The foreground service is the Android-native mechanism for keeping network connections alive without Google's push infrastructure.
+
 **Why does the signing interceptor build canonical JSON from the request body?**
 The server verifies the signature against the exact canonical JSON it receives. If the mobile serializes `{"b":1,"a":2}` in the body but signs `{"a":2,"b":1}` (sorted), the signature will fail verification. The canonical JSON must be built before both the body is sent AND the signing input is constructed — they must be identical.
 
-**Why does `FcmMessageRouter` write to the audit log on rejection, not just log to console?**
-`print()` and `Logger` output disappears when the device is not connected to a debugger. The audit log is persistent. If the app is being probed with malformed FCM messages (e.g., someone has obtained the device's FCM token and is sending unauthorized commands), those rejections must be queryable after the fact.
+**Why does `WsMessageRouter` write to the audit log on rejection, not just log to console?**
+`print()` and `Logger` output disappears when the device is not connected to a debugger. The audit log is persistent. If the agent is being probed with malformed WebSocket messages, those rejections must be queryable after the fact.
 
-**Why is `FcmMessageRouter` ignorant of what each handler does?**
-The router's only job is gate-keeping. It does not know what `Auth2faFcmHandler` does with a command ID. This separation means: a bug in the 2FA handler does not break OTP routing, a new capability can be added by registering a new handler without touching the router, and the router can be tested exhaustively with mock handlers.
+**Why is `WsMessageRouter` ignorant of what each handler does?**
+The router's only job is gate-keeping. It does not know what `Auth2faWsHandler` does with a command ID. This separation means: a bug in the 2FA handler does not break OTP routing, a new capability can be added by registering a new handler without touching the router, and the router can be tested exhaustively with mock handlers.
 
 ---
 
@@ -124,7 +144,7 @@ The router's only job is gate-keeping. It does not know what `Auth2faFcmHandler`
 - A nested map has its nested keys sorted independently
 - The output is identical across two calls with the same input
 
-**`FcmMessageRouter` tests must prove:**
+**`WsMessageRouter` tests must prove:**
 - A message with missing `capability` field → handler is never called, audit log receives one `unknownCommandRejected` entry
 - A message from an unknown `system_id` → handler is never called (**CF-03**)
 - A message for a capability not granted to the system → handler is never called (**CF-05**)
@@ -132,6 +152,10 @@ The router's only job is gate-keeping. It does not know what `Auth2faFcmHandler`
 
 **Architecture checks:**
 ```bash
+# No Firebase/FCM imports anywhere in the codebase
+grep -r "firebase\|FirebaseMessaging\|RemoteMessage" lib/
+# Expected: zero results
+
 # No capability-specific logic in shared infrastructure
 grep -r "AuthChallenge\|OtpDispatch\|PaymentObservation" lib/shared/
 # Expected: zero results
@@ -153,6 +177,7 @@ flutter build apk --debug --no-pub
 
 ## 6. What You Must NOT Do
 
+- ❌ Do not add `firebase_core`, `firebase_messaging`, or any Google package
 - ❌ Do not implement any capability handler yet — only stubs as `// TODO` comments
 - ❌ Do not build any capability domain entity, use case, or repository
 - ❌ Do not create a `Dio` instance outside of `HttpClientFactory` or `PairingRepositoryImpl`

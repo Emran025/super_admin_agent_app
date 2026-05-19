@@ -38,19 +38,20 @@ import '../shared/domain/paired_system_registry.dart';
 import '../shared/domain/secure_storage_service.dart';
 import '../shared/domain/signing_service.dart';
 import '../shared/domain/sms_parsing_service.dart';
+import '../shared/infrastructure/agent_websocket_service.dart';
 import '../shared/infrastructure/android_keystore_signing_service.dart';
 import '../shared/infrastructure/android_sms_sender_service.dart';
-import '../shared/infrastructure/fcm_message_router.dart';
 import '../shared/infrastructure/regex_sms_parsing_service.dart';
 import '../shared/infrastructure/sms_receiver_service.dart';
+import '../shared/infrastructure/ws_message_router.dart';
 
 final GetIt getIt = GetIt.instance;
 
 /// Wires all services into the DI container.
 ///
 /// Registration order matters — dependencies must be registered before
-/// their dependents. Called once from [main()] after Firebase and
-/// [SqliteAuditLogService] are initialized.
+/// their dependents. Called once from [main()] after [SqliteAuditLogService]
+/// and [AgentForegroundService] are initialized.
 Future<void> setupDependencies() async {
   // 1. Secure storage — foundation for all secrets.
   getIt.registerLazySingleton<SecureStorageService>(
@@ -103,15 +104,26 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 9. FCM message router — all capability handlers register here.
-  getIt.registerLazySingleton<FcmMessageRouter>(
-    () => FcmMessageRouter(
+  // 9. WebSocket message router — all capability handlers register here.
+  //    Replaces the former FcmMessageRouter. Routing logic is structurally identical.
+  getIt.registerLazySingleton<WsMessageRouter>(
+    () => WsMessageRouter(
       registry: getIt<PairedSystemRegistry>(),
       auditLogService: getIt<AuditLogService>(),
     ),
   );
 
-  // 10. Pairing use cases and cubit.
+  // 10. Agent WebSocket service — maintains persistent connection to Reverb.
+  //     Replaces Firebase Cloud Messaging as the command delivery channel.
+  getIt.registerLazySingleton<AgentWebSocketService>(
+    () => AgentWebSocketService(
+      router: getIt<WsMessageRouter>(),
+      registry: getIt<PairedSystemRegistry>(),
+      secureStorage: getIt<SecureStorageService>(),
+    ),
+  );
+
+  // 11. Pairing use cases and cubit.
   getIt.registerFactory<ScanPairingTokenUseCase>(
     () => ScanPairingTokenUseCase(repository: getIt<PairingRepository>()),
   );
@@ -137,7 +149,7 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 11. Phase 4 — 2FA capability bindings.
+  // 12. Phase 4 — 2FA capability bindings.
   getIt.registerLazySingleton<AuthChallengeRepository>(
     () => AuthChallengeRepositoryImpl(
       clientFactory: getIt<HttpClientFactory>(),
@@ -169,7 +181,7 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 12. Phase 5 — OTP Gateway capability bindings.
+  // 13. Phase 5 — OTP Gateway capability bindings.
   getIt.registerLazySingleton<OtpGatewayRepository>(
     () => OtpGatewayRepositoryImpl(
       clientFactory: getIt<HttpClientFactory>(),
@@ -202,7 +214,7 @@ Future<void> setupDependencies() async {
     ),
   );
 
-  // 13. Phase 6 — Payment Observation capability bindings.
+  // 14. Phase 6 — Payment Observation capability bindings.
   getIt.registerLazySingleton<PaymentObservationRepository>(
     () => PaymentObservationRepositoryImpl(
       clientFactory: getIt<HttpClientFactory>(),

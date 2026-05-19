@@ -1,46 +1,26 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'di/app_module.dart';
-import 'domain/pairing/value_objects/capability_grant.dart';
 import 'presentation/dashboard/pages/dashboard_page.dart';
 import 'presentation/pairing/cubit/pairing_cubit.dart';
 import 'presentation/pairing/pages/pairing_page.dart';
 import 'shared/data/sqlite_audit_log_service.dart';
 import 'shared/domain/paired_system_registry.dart';
-import 'shared/infrastructure/auth_2fa_fcm_handler.dart';
-import 'shared/infrastructure/fcm_message_router.dart';
-import 'shared/infrastructure/otp_gateway_fcm_handler.dart';
-import 'shared/infrastructure/payment_observation_fcm_handler.dart';
+import 'shared/infrastructure/agent_websocket_service.dart';
+import 'shared/infrastructure/auth_2fa_ws_handler.dart';
+import 'shared/infrastructure/otp_gateway_ws_handler.dart';
+import 'shared/infrastructure/payment_observation_ws_handler.dart';
 import 'shared/infrastructure/permission_handler_service.dart';
+import 'shared/infrastructure/ws_message_router.dart';
 
 // ---------------------------------------------------------------------------
 // Global navigator key
 // ---------------------------------------------------------------------------
 
-/// Required for pushing the 2FA approval dialog from [Auth2faFcmHandler],
-/// which has no BuildContext (FCM arrives outside the widget tree).
-///
-/// TODO(phase-7): extract to a NavigationService abstraction to reduce coupling.
+/// Required for pushing the 2FA approval dialog from [Auth2faWsHandler],
+/// which has no BuildContext (WebSocket arrives outside the widget tree).
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-// ---------------------------------------------------------------------------
-// Background FCM handler — top-level function required by Firebase
-// ---------------------------------------------------------------------------
-
-/// Must be annotated with @pragma('vm:entry-point') to survive tree-shaking.
-///
-/// DI is not available in the background isolate — full routing is wired
-/// only for foreground messages via [FirebaseMessaging.onMessage].
-///
-/// TODO(phase-7): Wire background isolate DI if background processing required.
-@pragma('vm:entry-point')
-Future<void> _fcmBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  // TODO(phase-7): Route message via FcmMessageRouter in background isolate.
-}
 
 // ---------------------------------------------------------------------------
 // App entry point
@@ -50,43 +30,41 @@ Future<void> main() async {
   // 1. Flutter engine must be initialized before any plugin is used.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Firebase must be initialized before any FCM call.
-  await Firebase.initializeApp();
+  // 2. Initialise the Android Foreground Service.
+  //    This keeps the process alive through Doze mode, ensuring the WebSocket
+  //    connection is never killed by the OS in the background.
+  await AgentForegroundService.init();
 
-  // 3. Register background handler before any messages can arrive.
-  FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
-
-  // 4. Initialize the append-only audit log database.
+  // 3. Initialize the append-only audit log database.
   await SqliteAuditLogService.init();
 
-  // 5. Wire all services into the DI container.
+  // 4. Wire all services into the DI container.
   await setupDependencies();
 
-  // 5.5. Request runtime permissions (Phase 7).
+  // 5. Request runtime permissions.
   await const PermissionHandlerService().requestAll();
 
   // 6. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();
 
-  // 7. Register all capability FCM handlers with the router.
-  final router = getIt<FcmMessageRouter>();
+  // 7. Register all capability WebSocket handlers with the router.
+  final router = getIt<WsMessageRouter>();
   router.registerHandler(
-    Capability.twoFa,
-    Auth2faFcmHandler(navigatorKey: navigatorKey),
+    CapabilityId.twoFa,
+    Auth2faWsHandler(navigatorKey: navigatorKey),
   );
   router.registerHandler(
-    Capability.otpGateway,
-    OtpGatewayFcmHandler(),
+    CapabilityId.otpGateway,
+    OtpGatewayWsHandler(),
   );
   router.registerHandler(
-    Capability.paymentObservation,
-    PaymentObservationFcmHandler(),
+    CapabilityId.paymentObservation,
+    PaymentObservationWsHandler(),
   );
 
-  // 8. Register foreground FCM handler.
-  FirebaseMessaging.onMessage.listen(
-    (msg) => getIt<FcmMessageRouter>().route(msg),
-  );
+  // 8. Open the persistent WebSocket connection to the Reverb server.
+  //    This replaces Firebase Cloud Messaging as the command delivery channel.
+  await getIt<AgentWebSocketService>().connect();
 
   // 9. Start the app.
   runApp(const SuperAdminAgentApp());
@@ -105,8 +83,7 @@ class SuperAdminAgentApp extends StatelessWidget {
       title: 'Super Admin Agent',
       debugShowCheckedModeBanner: false,
 
-      // Global navigator key — required for 2FA dialog from FCM handler.
-      // TODO(phase-7): extract to NavigationService
+      // Global navigator key — required for 2FA dialog from WS handler.
       navigatorKey: navigatorKey,
 
       // Initial route is determined at runtime by registry state.
@@ -133,8 +110,6 @@ class SuperAdminAgentApp extends StatelessWidget {
   }
 
   /// Determines the starting page based on registry state at cold start.
-  ///
-  /// Presentation routing decision — not a business rule (Constraint 2.4).
   Widget _resolveInitialPage() {
     final registry = getIt<PairedSystemRegistry>();
     if (registry.all.isEmpty) {
@@ -158,9 +133,12 @@ class SuperAdminAgentApp extends StatelessWidget {
 // TODO(phase-7-android): Implement Kotlin MethodChannel handler for SmsManager with sentIntent/deliveredIntent PendingIntents
 // TODO(phase-7-android): Implement Kotlin BroadcastReceiver for SMS_RECEIVED → EventChannel to Flutter
 // TODO(phase-7-android): Implement KeyguardManager.isDeviceSecure() check via platform channel (SC-10)
+// TODO(phase-7): Inject HttpClientFactory into AgentWebSocketService for full signing interceptor on channel auth
+// TODO(phase-7): Re-initialise DI and AgentWebSocketService inside the background isolate (_onStart)
 // TODO(phase-7): Extract global navigator key to a NavigationService abstraction
 // TODO(phase-7): Refactor AuthChallengeCubit DI to inject systemId at call time rather than placeholder
 // TODO(future): Hardware Keystore key rotation policy
 // TODO(future): Certificate pinning on Dio instances
 // TODO(future): Concurrent 2FA challenge handling for multi-system deployments
 // TODO(future): Log export endpoint wiring (send audit log to server on demand)
+// TODO(future): Reconnect WebSocket inside background isolate after Doze wake

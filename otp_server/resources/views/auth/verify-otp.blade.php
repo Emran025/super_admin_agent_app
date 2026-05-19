@@ -220,9 +220,9 @@
         </p>
 
         <div class="security-note">
-            <strong>Zero-Trust Security:</strong> This code was sent via a cryptographically
-            signed FCM push to your paired Android agent. The server never stores the
-            plaintext code — only a bcrypt hash for verification.
+            <strong>Zero-Trust Security:</strong> This code was delivered via a cryptographically
+            signed WebSocket push to your self-hosted paired Android agent. The server never
+            stores the plaintext code — only a bcrypt hash for verification.
         </div>
     </div>
 </body>

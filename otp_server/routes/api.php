@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AgentReportController;
+use App\Http\Controllers\Api\BroadcastingAuthController;
 use App\Http\Controllers\Api\OtpCommandController;
 use App\Http\Controllers\Api\PairingController;
 use Illuminate\Support\Facades\Route;
@@ -17,11 +18,16 @@ use Illuminate\Support\Facades\Route;
 |   POST  /api/v1/pair
 |     ↳ PairingController::pair()
 |     ↳ Body: {pairing_token, public_key_base64, public_key_id}
-|     ↳ Header: X-FCM-Token
+|     ↳ Response includes Reverb connection parameters (host, port, app_key)
+|
+|   POST  /api/v1/broadcasting/auth
+|     ↳ BroadcastingAuthController::auth()
+|     ↳ Authenticates agent to subscribe to private-agent.{system_id} channel
+|     ↳ Uses ECDSA signed request headers (X-Agent-Public-Key-Id, X-Agent-Signature, etc.)
 |
 |   GET   /api/v1/otp-commands/{commandId}
 |     ↳ OtpCommandController::show()
-|     ↳ Returns full OtpDispatchCommandDto (agent calls this after FCM trigger)
+|     ↳ Returns full OtpDispatchCommandDto (agent fetches this after WebSocket trigger)
 |
 |   POST  /api/v1/otp-commands/{commandId}/report
 |     ↳ AgentReportController::report()
@@ -32,6 +38,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('/pair', [PairingController::class, 'pair']);
+
+    Route::post('/broadcasting/auth', [BroadcastingAuthController::class, 'auth']);
 
     Route::get('/otp-commands/{commandId}', [OtpCommandController::class, 'show']);
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);

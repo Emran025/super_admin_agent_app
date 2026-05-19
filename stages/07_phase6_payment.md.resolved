@@ -132,9 +132,9 @@ Cubit dependencies: `RegisterObservationSessionUseCase`, `ProcessIncomingSmsUseC
 On each incoming SMS: processes → matches → reports → cancels subscription → emits `Reported`.
 Override `close()` to cancel the SMS subscription.
 
-### FCM Handler and DI
-Create `lib/shared/infrastructure/payment_observation_fcm_handler.dart`. Implements `CapabilityCommandHandler`. In `handle()`: retrieves `PaymentObservationCubit`, calls `startObservation()`.
-Update `lib/di/app_module.dart`: replace `// TODO(phase-6)` with payment observation module registrations.
+### WebSocket Handler and DI
+Create `lib/shared/infrastructure/payment_observation_ws_handler.dart`. Implements `CapabilityCommandHandler` (from `ws_message_router.dart`). In `handle()`: retrieves `PaymentObservationCubit`, calls `startObservation()`.
+Update `lib/di/app_module.dart`: replace `// TODO(phase-6)` with payment observation module registrations. Register `PaymentObservationWsHandler` with `WsMessageRouter` in `main.dart`.
 
 ---
 

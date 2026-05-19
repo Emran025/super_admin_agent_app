@@ -13,6 +13,10 @@ use Illuminate\Support\Str;
  *
  * Completes the pairing ceremony between the server and a mobile agent.
  *
+ * The agent receives its system_id and Reverb connection parameters in the
+ * response. After pairing, the agent connects to the Reverb WebSocket server
+ * and subscribes to its private channel: private-agent.{system_id}.
+ *
  * Expected request body (matches PairingRequestDto on the Flutter side):
  *   {
  *     "pairing_token"   : "<shared secret distributed out-of-band>",
@@ -27,7 +31,10 @@ use Illuminate\Support\Str;
  *     "system_label"       : "<human-readable label>",
  *     "base_url"           : "<server base URL>",
  *     "granted_capabilities": ["otp_gateway"],
- *     "paired_at"          : "<ISO 8601>"
+ *     "paired_at"          : "<ISO 8601>",
+ *     "reverb_host"        : "<reverb host>",
+ *     "reverb_port"        : <reverb port>,
+ *     "reverb_app_key"     : "<reverb app key>"
  *   }
  */
 class PairingController extends Controller
@@ -35,19 +42,14 @@ class PairingController extends Controller
     public function pair(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'pairing_token'    => 'required|string',
-            'public_key_base64'=> 'required|string',
-            'public_key_id'    => 'required|string',
+            'pairing_token'     => 'required|string',
+            'public_key_base64' => 'required|string',
+            'public_key_id'     => 'required|string',
         ]);
 
         $expectedToken = config('otp_server.pairing_token');
         if (!hash_equals((string) $expectedToken, $data['pairing_token'])) {
             return response()->json(['error' => 'Invalid pairing token.'], 401);
-        }
-
-        $fcmToken = $request->header('X-FCM-Token', '');
-        if (empty($fcmToken)) {
-            return response()->json(['error' => 'X-FCM-Token header is required.'], 422);
         }
 
         $systemId = (string) Str::uuid();
@@ -61,7 +63,6 @@ class PairingController extends Controller
                 'agent_id'         => $agentId,
                 'agent_public_key' => $data['public_key_base64'],
                 'public_key_id'    => $data['public_key_id'],
-                'fcm_token'        => $fcmToken,
                 'capabilities'     => ['otp_gateway'],
                 'paired_at'        => $pairedAt,
             ]
@@ -74,6 +75,9 @@ class PairingController extends Controller
             'base_url'             => config('app.url'),
             'granted_capabilities' => $agent->capabilities,
             'paired_at'            => $agent->paired_at->toIso8601String(),
+            'reverb_host'          => env('REVERB_HOST', 'localhost'),
+            'reverb_port'          => (int) env('REVERB_PORT', 8080),
+            'reverb_app_key'       => env('REVERB_APP_KEY', ''),
         ], 201);
     }
 }

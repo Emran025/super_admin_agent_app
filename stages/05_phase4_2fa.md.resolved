@@ -120,12 +120,12 @@ Dependencies: `ReceiveAuthChallengeUseCase`, `RecordUserDecisionUseCase`, `Submi
 **`widgets/challenge_approval_dialog.dart`**
 A `StatelessWidget` wrapped in `BlocConsumer`. Uses `PopScope(canPop: false)` — the owner cannot back out without making a decision. Displays: `contextLabel`, `challengeId` (for reference), `expiresAt`. Two buttons: APPROVE and REJECT. Each calls `cubit.submitDecision()` with the appropriate `AgentDecision`. No auto-dismiss on timeout.
 
-### FCM Handler and DI
+### WebSocket Handler and DI
 
-**`lib/shared/infrastructure/auth_2fa_fcm_handler.dart`**
-Implements `CapabilityCommandHandler`. In `handle()`: retrieves the `AuthChallengeCubit` from `GetIt`, calls `loadChallenge()`, then pushes the approval dialog via the global navigator key. Document the navigator key dependency as `// TODO(phase-7): move navigator key to a dedicated navigation service`.
+**`lib/shared/infrastructure/auth_2fa_ws_handler.dart`**
+Implements `CapabilityCommandHandler` (from `ws_message_router.dart`). In `handle()`: retrieves the `AuthChallengeCubit` from `GetIt`, calls `loadChallenge()`, then pushes the approval dialog via the global navigator key. Document the navigator key dependency as `// TODO(phase-7): move navigator key to a dedicated navigation service`.
 
-Update `lib/di/app_module.dart`: replace `// TODO(phase-4)` with registrations for `AuthChallengeRemoteDataSource` (factory with systemId param), `AuthChallengeRepository` (factory with systemId param), and `AuthChallengeCubit`. Register `Auth2faFcmHandler` with the FCM router.
+Update `lib/di/app_module.dart`: replace `// TODO(phase-4)` with registrations for `AuthChallengeRemoteDataSource` (factory with systemId param), `AuthChallengeRepository` (factory with systemId param), and `AuthChallengeCubit`. Register `Auth2faWsHandler` with `WsMessageRouter` in `main.dart`.
 
 ---
 
@@ -155,7 +155,7 @@ A challenge cannot be "dismissed" — there is no neutral outcome. If the owner 
 **Architecture checks:**
 ```bash
 # No Flutter imports in 2FA domain
-grep -r "package:flutter\|package:firebase\|package:dio" lib/domain/auth_2fa/
+grep -r "package:flutter\|package:firebase_core\|package:firebase_messaging\|package:dio" lib/domain/auth_2fa/
 # Expected: zero results
 
 # No 2FA domain types imported in other capability domains

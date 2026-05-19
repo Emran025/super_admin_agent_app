@@ -49,25 +49,23 @@ All three capabilities (2FA push approval, SMS gateway, bank SMS monitoring) dep
 | `flutter_secure_storage` | Android EncryptedSharedPreferences — only acceptable plaintext-free storage for secrets |
 | `sqflite` | Append-only audit log database |
 | `pointycastle` | EC P-256 key generation and ECDSA signing (Phase 1 software implementation) |
-| `firebase_core` + `firebase_messaging` | FCM push notification delivery for 2FA and OTP commands |
+| `web_socket_channel` | WebSocket client — persistent connection to self-hosted Reverb server for command delivery |
+| `flutter_background_service` | Android Foreground Service — keeps the WebSocket alive through Doze mode indefinitely |
 | `mobile_scanner` | QR code scanning for pairing ceremony |
 | `decimal` | Money arithmetic — `double` is forbidden for financial amounts |
 | `uuid` | Audit log entry IDs and local observation IDs |
 | `logger` | Structured logging — `print()` is forbidden in production |
 
+**Architectural note on transport**: This system uses **no Firebase or Google services**. Command delivery from the server to the agent uses a self-hosted [Laravel Reverb](https://reverb.laravel.com/) WebSocket server. The agent maintains a persistent authenticated WebSocket connection to a private channel (`private-agent.{system_id}`). `flutter_background_service` is required to keep this connection alive through Android Doze mode without relying on Google's push infrastructure.
+
 ---
 
 ## 4. What to Build
 
-### Step A: Create the project
-```bash
-flutter create --org com.superadmin --project-name super_admin_agent --platforms android super_admin_agent_app
-```
-
-### Step B: Replace pubspec.yaml
+### `pubspec.yaml`
 ```yaml
 name: super_admin_agent
-description: "Private Trusted Mobile Agent — Push 2FA, SMS OTP Gateway, Payment Observation."
+description: "Private Trusted Mobile Agent — WebSocket 2FA, SMS OTP Gateway, Payment Observation."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -88,12 +86,13 @@ dependencies:
   path: ^1.9.0
   local_auth: ^2.2.0
   pointycastle: ^3.9.1
-  firebase_core: ^3.3.0
-  firebase_messaging: ^15.1.0
+  web_socket_channel: ^3.0.1
+  flutter_background_service: ^5.0.5
   mobile_scanner: ^5.2.3
   decimal: ^3.0.2
   uuid: ^4.4.2
   logger: ^2.4.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
@@ -105,156 +104,125 @@ flutter:
   uses-material-design: true
 ```
 
-### Step C: Create this exact directory tree
-Every leaf directory must contain exactly one file named `placeholder.dart` with this content and nothing else:
-```dart
-// TODO(phase-0): Replace with implementation in the assigned phase.
+### `android/app/src/main/AndroidManifest.xml` — Required permissions
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.SEND_SMS" />
+<uses-permission android:name="android.permission.RECEIVE_SMS" />
+<uses-permission android:name="android.permission.READ_SMS" />
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
+<uses-permission android:name="android.permission.USE_FINGERPRINT" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
+
+### `lib/` directory structure
+
+Create placeholder files (empty `// TODO` stubs) at every path in this tree:
 
 ```
 lib/
-├── domain/
-│   ├── auth_2fa/
-│   │   ├── entities/
-│   │   ├── value_objects/
-│   │   ├── repositories/
-│   │   └── use_cases/
-│   ├── otp_gateway/
-│   │   ├── entities/
-│   │   ├── value_objects/
-│   │   ├── repositories/
-│   │   └── use_cases/
-│   ├── payment_observation/
-│   │   ├── entities/
-│   │   ├── value_objects/
-│   │   ├── repositories/
-│   │   └── use_cases/
-│   └── pairing/
-│       ├── entities/
-│       ├── value_objects/
-│       ├── repositories/
-│       └── use_cases/
-├── data/
-│   ├── auth_2fa/
-│   │   ├── dtos/
-│   │   ├── remote/
-│   │   └── repositories/
-│   ├── otp_gateway/
-│   │   ├── dtos/
-│   │   ├── remote/
-│   │   └── repositories/
-│   ├── payment_observation/
-│   │   ├── dtos/
-│   │   ├── remote/
-│   │   └── repositories/
-│   └── pairing/
-│       ├── dtos/
-│       ├── local/
-│       ├── remote/
-│       └── repositories/
-├── presentation/
-│   ├── auth_2fa/
-│   │   ├── cubit/
-│   │   └── widgets/
-│   ├── otp_gateway/
-│   │   └── cubit/
-│   ├── payment_observation/
-│   │   └── cubit/
-│   ├── pairing/
-│   │   ├── cubit/
-│   │   └── pages/
-│   └── dashboard/
-│       └── pages/
-├── shared/
-│   ├── domain/
-│   ├── data/
-│   └── infrastructure/
-└── di/
+  main.dart
+  di/
+    app_module.dart
+  domain/
+    auth_2fa/
+      entities/auth_challenge.dart
+      repositories/auth_challenge_repository.dart
+      use_cases/receive_auth_challenge_use_case.dart
+      use_cases/record_user_decision_use_case.dart
+      use_cases/submit_challenge_response_use_case.dart
+      value_objects/agent_decision.dart
+      value_objects/challenge_status.dart
+    otp_gateway/
+      entities/otp_dispatch_command.dart
+      repositories/otp_gateway_repository.dart
+      use_cases/execute_sms_dispatch_use_case.dart
+      use_cases/receive_dispatch_command_use_case.dart
+      use_cases/report_delivery_status_use_case.dart
+    pairing/
+      entities/paired_system.dart
+      repositories/pairing_repository.dart
+      use_cases/complete_pairing_use_case.dart
+      use_cases/scan_pairing_token_use_case.dart
+      use_cases/unpair_system_use_case.dart
+      value_objects/capability_grant.dart
+    payment_observation/
+      entities/observation_session.dart
+      repositories/payment_observation_repository.dart
+      use_cases/match_observation_to_intent_use_case.dart
+      use_cases/process_incoming_sms_use_case.dart
+      use_cases/register_observation_session_use_case.dart
+      use_cases/report_observation_use_case.dart
+  data/
+    auth_2fa/repositories/auth_challenge_repository_impl.dart
+    otp_gateway/repositories/otp_gateway_repository_impl.dart
+    pairing/repositories/pairing_repository_impl.dart
+    payment_observation/repositories/payment_observation_repository_impl.dart
+  presentation/
+    auth_2fa/
+      cubit/auth_challenge_cubit.dart
+      widgets/challenge_approval_dialog.dart
+    dashboard/pages/dashboard_page.dart
+    otp_gateway/cubit/otp_dispatch_cubit.dart
+    pairing/
+      cubit/pairing_cubit.dart
+      pages/pairing_page.dart
+    payment_observation/cubit/payment_observation_cubit.dart
+  shared/
+    data/
+      canonical_json.dart
+      crypto_nonce_generator.dart
+      http_client_factory.dart
+      paired_system_registry_impl.dart
+      secure_storage_service_impl.dart
+      sqlite_audit_log_service.dart
+    domain/
+      audit_log_service.dart
+      nonce_generator.dart
+      paired_system_registry.dart
+      secure_storage_service.dart
+      signing_service.dart
+      sms_parsing_service.dart
+    infrastructure/
+      agent_websocket_service.dart
+      android_keystore_signing_service.dart
+      android_sms_sender_service.dart
+      auth_2fa_ws_handler.dart
+      otp_gateway_ws_handler.dart
+      payment_observation_ws_handler.dart
+      permission_handler_service.dart
+      regex_sms_parsing_service.dart
+      sms_receiver_service.dart
+      ws_message_router.dart
 ```
 
-### Step D: Android manifest — add inside `<manifest>` before `<application>`
-```xml
-<uses-permission android:name="android.permission.SEND_SMS"/>
-<uses-permission android:name="android.permission.RECEIVE_SMS"/>
-<uses-permission android:name="android.permission.READ_SMS"/>
-<uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-<uses-permission android:name="android.permission.INTERNET"/>
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-<uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-<uses-permission android:name="android.permission.CAMERA"/>
-```
-
-Add to `<application>` tag: `android:usesCleartextTraffic="false"`
-
-This enforces HTTPS-only at the OS level. Any accidental plain HTTP call will fail at the network layer, not silently succeed.
-
-### Step E: `android/app/build.gradle`
-Set `minSdkVersion 26` in the `defaultConfig` block.
-
-### Step F: `analysis_options.yaml`
+### `analysis_options.yaml`
+Enable `flutter_lints` and add these custom rules:
 ```yaml
 include: package:flutter_lints/flutter.yaml
 
 linter:
   rules:
-    - avoid_print
-    - always_declare_return_types
-    - prefer_final_locals
-    - prefer_const_constructors
-    - avoid_dynamic_calls
-
-analyzer:
-  errors:
-    missing_return: error
-    unused_import: error
-    dead_code: warning
-```
-
-### Step G: Minimal `lib/main.dart`
-```dart
-import 'package:flutter/material.dart';
-
-void main() {
-  runApp(const SuperAdminAgentApp());
-}
-
-class SuperAdminAgentApp extends StatelessWidget {
-  const SuperAdminAgentApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Super Admin Agent',
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(
-          child: Text(
-            'Phase 0: Scaffold Only',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-        ),
-      ),
-    );
-  }
-}
+    avoid_print: true
+    prefer_const_constructors: true
+    prefer_final_fields: true
+    require_trailing_commas: true
 ```
 
 ---
 
-## 5. Verification — Must ALL Pass Before Phase 1
+## 5. Verification
 
 ```bash
-# Dependency resolution — must complete with no errors
 flutter pub get
-
-# Static analysis — must show "No issues found!"
 flutter analyze
-
-# Compilation check — must produce an APK without errors
 flutter build apk --debug --no-pub
-
-# Directory existence check — must show all 40+ directories
-find lib/ -type d | sort
 ```
 
-**Do not proceed to Phase 1 if any of these produce errors.**
+Expected: zero analysis errors, successful APK build.
+
+**Do not proceed to Phase 1 until the build succeeds.**

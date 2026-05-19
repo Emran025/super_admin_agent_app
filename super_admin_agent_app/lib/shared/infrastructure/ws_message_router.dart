@@ -1,14 +1,13 @@
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:uuid/uuid.dart';
 
 import '../domain/audit_log_service.dart';
 import '../domain/paired_system_registry.dart';
 
 // ---------------------------------------------------------------------------
-// Capability ID constants — mirror Capability value object from Phase 2
+// Capability ID constants
 // ---------------------------------------------------------------------------
 
-/// String constants for the capability identifiers the FCM router recognises.
+/// String constants for the capability identifiers the WebSocket router recognises.
 ///
 /// Values must match [Capability.twoFa], [Capability.otpGateway],
 /// [Capability.paymentObservation] in [lib/domain/pairing/value_objects/].
@@ -22,10 +21,10 @@ abstract class CapabilityId {
 // Handler interface
 // ---------------------------------------------------------------------------
 
-/// A capability-specific handler invoked by [FcmMessageRouter].
+/// A capability-specific handler invoked by [WsMessageRouter].
 ///
-/// Implementations live in each capability's data layer.
-/// The router NEVER passes the raw [RemoteMessage] to the handler —
+/// Implementations live in each capability's infrastructure layer.
+/// The router NEVER passes the raw WebSocket message map to the handler —
 /// only the extracted, validated identifiers.
 abstract class CapabilityCommandHandler {
   Future<void> handle({required String commandId, required String systemId});
@@ -35,7 +34,11 @@ abstract class CapabilityCommandHandler {
 // Router
 // ---------------------------------------------------------------------------
 
-/// Routes incoming FCM push messages to the correct capability handler.
+/// Routes incoming WebSocket command messages to the correct capability handler.
+///
+/// This is a structural drop-in replacement for the former FcmMessageRouter.
+/// The routing logic and all four stop conditions are identical; only the
+/// message source changes (WebSocket JSON map instead of RemoteMessage.data).
 ///
 /// Enforces four stop conditions in strict order (Constraint 2.3):
 /// 1. Required fields present: [capability], [command_id], [system_id]
@@ -43,15 +46,14 @@ abstract class CapabilityCommandHandler {
 /// 3. [capability] is granted to that system (CF-05)
 /// 4. A handler is registered for [capability] (Axiom 10)
 ///
-/// Rejections at any stop condition are written to the audit log —
-/// NOT just printed — so they are queryable after the fact.
-class FcmMessageRouter {
+/// Rejections at any stop condition are written to the audit log.
+class WsMessageRouter {
   final PairedSystemRegistry _registry;
   final AuditLogService _auditLogService;
   final Map<String, CapabilityCommandHandler> _handlers = {};
   final _uuid = const Uuid();
 
-  FcmMessageRouter({
+  WsMessageRouter({
     required PairedSystemRegistry registry,
     required AuditLogService auditLogService,
   })  : _registry = registry,
@@ -64,10 +66,11 @@ class FcmMessageRouter {
     _handlers[capabilityId] = handler;
   }
 
-  /// Routes [message] through all four stop conditions, then dispatches.
-  Future<void> route(RemoteMessage message) async {
-    final data = message.data;
-
+  /// Routes a decoded WebSocket event payload through all four stop conditions.
+  ///
+  /// [data] is the `broadcastWith()` payload from AgentCommandDispatched —
+  /// structurally identical to the former FCM data payload.
+  Future<void> route(Map<String, dynamic> data) async {
     // Stop 1: Required fields present.
     final capability = data['capability'] as String?;
     final commandId = data['command_id'] as String?;

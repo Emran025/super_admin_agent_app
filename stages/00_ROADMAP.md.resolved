@@ -23,12 +23,12 @@ Each file in this artifact set (`Phase 0` through `Phase 10`) is a **complete, s
 | **Phase 0** | Flutter scaffold + pubspec | Compilable empty project, all dependencies locked |
 | **Phase 1** | Cryptographic infrastructure | Keystore signing, flutter_secure_storage wrapper, nonce generator |
 | **Phase 2** | Pairing domain + registry | QR parse, key generation, server registration, PairedSystemRegistry |
-| **Phase 3** | Shared infrastructure | HTTP client factory, audit log service, FCM message router skeleton |
+| **Phase 3** | Shared infrastructure | HTTP client factory, audit log service, WebSocket message router, Reverb foreground service |
 | **Phase 4** | Push-Based 2FA capability | Full Domain → Data → Presentation for 2FA |
 | **Phase 5** | SMS OTP Gateway capability | Full Domain → Data → Presentation for OTP |
 | **Phase 6** | Payment Observation capability | Full Domain → Data → Presentation for Payment |
 | **Phase 7** | App assembly + hardening | Routing, dashboard, DI wiring, stop-condition enforcement, security checklist |
-| **Phase 8** | Laravel OTP testbed server | Webhook verification, FCM dispatch, database scaffolding |
+| **Phase 8** | Laravel OTP testbed server | Webhook verification, Reverb WebSocket broadcast, database scaffolding |
 | **Phase 10** | Laravel testing & CI/CD | Model factories, security pipeline, replay attack prevention |
 
 ---
@@ -38,7 +38,7 @@ Each file in this artifact set (`Phase 0` through `Phase 10`) is a **complete, s
 - **Axiom 1**: Mobile is executor, not decision-maker
 - **Axiom 5**: No plaintext secrets
 - **Axiom 6**: All server responses signed
-- **Axiom 7**: No Flutter/Firebase in Domain layer (AF-01)
+- **Axiom 7**: No Flutter/Firebase/Google in Domain layer (AF-01) — transport is exclusively self-hosted Reverb WebSocket
 - **Axiom 8**: Every action is logged
 - **Axiom 9**: No hardcoded system references
 - **Axiom 10**: Uncertainty stops execution

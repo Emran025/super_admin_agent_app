@@ -40,7 +40,7 @@ class AgentFactory extends Factory
             'agent_id'         => (string) Str::uuid(),
             'agent_public_key' => self::TEST_PUBLIC_KEY_BASE64URL,
             'public_key_id'    => self::TEST_PUBLIC_KEY_ID,
-            'fcm_token'        => 'test-fcm-token-' . Str::random(16),
+
             'capabilities'     => ['otp_gateway'],
             'paired_at'        => now(),
         ];
