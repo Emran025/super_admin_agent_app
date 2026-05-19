@@ -5,6 +5,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:logger/logger.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../data/http_client_factory.dart';
 import '../domain/paired_system_registry.dart';
 import '../domain/secure_storage_service.dart';
 import 'ws_message_router.dart';
@@ -16,7 +17,6 @@ import 'ws_message_router.dart';
 const _kReverbHost = 'reverb_host';
 const _kReverbPort = 'reverb_port';
 const _kReverbAppKey = 'reverb_app_key';
-const _kAuthEndpoint = 'auth_endpoint';
 
 // ---------------------------------------------------------------------------
 // AgentWebSocketService
@@ -29,7 +29,8 @@ const _kAuthEndpoint = 'auth_endpoint';
 ///   1. Reads Reverb connection parameters from secure storage (written at pairing).
 ///   2. Connects to Reverb using the Pusher WebSocket protocol.
 ///   3. Authenticates the private channel (private-agent.{systemId}) by calling
-///      POST /api/v1/broadcasting/auth with the agent's ECDSA-signed headers.
+///      POST /api/v1/broadcasting/auth using the authenticated [HttpClientFactory].
+///      The signing interceptor automatically adds all required ECDSA headers.
 ///   4. Routes all incoming AgentCommandDispatched events to [WsMessageRouter].
 ///   5. Auto-reconnects with exponential back-off on any disconnect or error.
 ///
@@ -44,11 +45,12 @@ const _kAuthEndpoint = 'auth_endpoint';
 ///   - Private channel subscription requires ECDSA-signed authentication.
 ///   - No command payload is stored beyond the routing call.
 ///   - All reconnection attempts respect the nonce uniqueness requirement —
-///     a fresh nonce is generated per auth request.
+///     a fresh nonce is generated per auth request (via the signing interceptor).
 class AgentWebSocketService {
   final WsMessageRouter _router;
   final PairedSystemRegistry _registry;
   final SecureStorageService _secureStorage;
+  final HttpClientFactory _clientFactory;
   final _log = Logger();
 
   WebSocketChannel? _channel;
@@ -63,9 +65,11 @@ class AgentWebSocketService {
     required WsMessageRouter router,
     required PairedSystemRegistry registry,
     required SecureStorageService secureStorage,
+    required HttpClientFactory clientFactory,
   })  : _router = router,
         _registry = registry,
-        _secureStorage = secureStorage;
+        _secureStorage = secureStorage,
+        _clientFactory = clientFactory;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -180,13 +184,10 @@ class AgentWebSocketService {
     if (_socketId == null) return;
 
     final channelName = 'private-agent.$systemId';
-    final authEndpoint = (await _secureStorage.read(key: _kAuthEndpoint))
-        .fold((_) => '', (v) => v ?? '');
 
     try {
-      // Authenticate the private channel via the signed HTTP endpoint.
       final authToken = await _fetchChannelAuth(
-        authEndpoint: authEndpoint,
+        systemId: systemId,
         socketId: _socketId!,
         channelName: channelName,
       );
@@ -203,25 +204,45 @@ class AgentWebSocketService {
     }
   }
 
-  /// Calls POST /api/v1/broadcasting/auth using the agent's signing interceptor.
+  /// Authenticates the private Reverb channel by calling
+  /// POST /api/v1/broadcasting/auth with ECDSA-signed headers.
   ///
-  /// Note: Since this service lives outside the full Dio signing stack,
-  /// a lightweight signed HTTP call is made directly here. In Phase 7 the
-  /// HttpClientFactory can be injected to fully reuse the signing interceptor.
+  /// Uses [HttpClientFactory.forSystem] to obtain an authenticated [Dio]
+  /// instance. The [_AgentSigningInterceptor] attached to that client
+  /// automatically adds X-Agent-Public-Key-Id, X-Agent-Nonce,
+  /// X-Agent-Timestamp, and X-Agent-Signature headers — one fresh
+  /// nonce per request (replay protection).
   ///
-  /// TODO(phase-7): Inject HttpClientFactory and use its authenticated Dio client.
+  /// The auth endpoint is derived from the system's baseUrl at runtime
+  /// so it is always consistent with the paired server's address.
   Future<String> _fetchChannelAuth({
-    required String authEndpoint,
+    required String systemId,
     required String socketId,
     required String channelName,
   }) async {
-    // The full implementation will use the signing interceptor.
-    // For now, return a placeholder that triggers channel auth via the server.
-    // This is wired fully in Phase 7 when the Dio signing stack is injected here.
-    throw UnimplementedError(
-      'Channel auth must be wired with HttpClientFactory in Phase 7. '
-      'See BroadcastingAuthController on the server side.',
+    final system = _registry.findBySystemId(systemId);
+    if (system == null) {
+      throw StateError(
+        'CF-03: Cannot authenticate channel for unknown system "$systemId".',
+      );
+    }
+
+    final authEndpoint = '${system.baseUrl}/api/v1/broadcasting/auth';
+    final dio = _clientFactory.forSystem(systemId);
+
+    final response = await dio.post<Map<String, dynamic>>(
+      authEndpoint,
+      data: {
+        'socket_id': socketId,
+        'channel_name': channelName,
+      },
     );
+
+    final auth = response.data?['auth'] as String?;
+    if (auth == null || auth.isEmpty) {
+      throw StateError('Broadcasting auth endpoint returned empty auth token.');
+    }
+    return auth;
   }
 
   Future<void> _onAgentCommand(dynamic rawData) async {

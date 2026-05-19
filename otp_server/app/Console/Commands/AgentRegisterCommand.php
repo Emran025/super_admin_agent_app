@@ -15,7 +15,6 @@ use Illuminate\Support\Str;
  *     --agent-id=<uuid>           (optional — auto-generated if omitted)
  *     --public-key=<base64url>    (required — 65-byte uncompressed P-256 EC point)
  *     --public-key-id=<uuid>      (required — matches the agent's Keystore alias)
- *     --fcm-token=<token>         (required — the agent's current FCM registration token)
  *     --capabilities=<csv>        (optional — comma-separated; default: otp_gateway)
  *
  * This command is primarily used in development/testbed environments to seed an agent
@@ -29,7 +28,6 @@ class AgentRegisterCommand extends Command
                             {--agent-id= : The agent UUID (auto-generated if omitted)}
                             {--public-key= : Base64url-encoded 65-byte uncompressed P-256 EC point (REQUIRED)}
                             {--public-key-id= : UUID key alias from the Android Keystore (REQUIRED)}
-                            {--fcm-token= : FCM registration token for this agent (REQUIRED)}
                             {--capabilities= : Comma-separated capability list (default: otp_gateway)}';
 
     protected $description = 'Register or update a paired mobile agent record in the database.';
@@ -38,10 +36,9 @@ class AgentRegisterCommand extends Command
     {
         $publicKey   = $this->option('public-key');
         $publicKeyId = $this->option('public-key-id');
-        $fcmToken    = $this->option('fcm-token');
 
-        if (!$publicKey || !$publicKeyId || !$fcmToken) {
-            $this->error('--public-key, --public-key-id, and --fcm-token are all required.');
+        if (!$publicKey || !$publicKeyId) {
+            $this->error('--public-key and --public-key-id are required.');
             return self::FAILURE;
         }
 
@@ -68,7 +65,6 @@ class AgentRegisterCommand extends Command
                 'agent_id'         => $agentId,
                 'agent_public_key' => $publicKey,
                 'public_key_id'    => $publicKeyId,
-                'fcm_token'        => $fcmToken,
                 'capabilities'     => array_values($capabilities),
                 'paired_at'        => now(),
             ]

@@ -9,6 +9,12 @@ import '../../../domain/pairing/repositories/pairing_repository.dart';
 import '../../../shared/domain/secure_storage_service.dart';
 import '../dtos/pairing_dtos.dart';
 
+// Secure storage keys for Reverb WebSocket connection parameters.
+// Must match the constants in AgentWebSocketService.
+const _kReverbHost = 'reverb_host';
+const _kReverbPort = 'reverb_port';
+const _kReverbAppKey = 'reverb_app_key';
+
 /// Concrete implementation of [PairingRepository].
 ///
 /// Uses a plain unauthenticated [Dio] instance — the only acceptable
@@ -17,6 +23,11 @@ import '../dtos/pairing_dtos.dart';
 /// in the request body. (Spec §4 justification)
 ///
 /// All URLs come from the QR token — never hardcoded (Constraint 2.2 / Axiom 9).
+///
+/// After a successful server registration, the Reverb WebSocket connection
+/// parameters (reverb_host, reverb_port, reverb_app_key) returned in the
+/// pairing response are stored in secure storage so that [AgentWebSocketService]
+/// can connect to Reverb at startup without re-fetching them.
 class PairingRepositoryImpl implements PairingRepository {
   static const String _storageKey = 'paired_systems_json_list';
 
@@ -73,6 +84,12 @@ class PairingRepositoryImpl implements PairingRepository {
       }
 
       final dto = PairedSystemDto.fromJson(body);
+
+      // Persist Reverb WebSocket connection parameters to secure storage so
+      // that AgentWebSocketService can connect to Reverb after pairing.
+      // These are NOT part of the PairedSystem entity itself.
+      await _saveReverbParams(dto);
+
       return Right(dto.toEntity());
     } on DioException catch (e) {
       return Left(RegistrationFailure(e.message ?? 'Network error'));
@@ -115,6 +132,27 @@ class PairingRepositoryImpl implements PairingRepository {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /// Saves Reverb WebSocket connection parameters from the server pairing
+  /// response to secure storage. Silently skips fields that are absent
+  /// (e.g. during unit tests with partial mocks).
+  Future<void> _saveReverbParams(PairedSystemDto dto) async {
+    if (dto.reverbHost != null) {
+      await _secureStorage.write(key: _kReverbHost, value: dto.reverbHost!);
+    }
+    if (dto.reverbPort != null) {
+      await _secureStorage.write(
+        key: _kReverbPort,
+        value: dto.reverbPort!.toString(),
+      );
+    }
+    if (dto.reverbAppKey != null) {
+      await _secureStorage.write(
+        key: _kReverbAppKey,
+        value: dto.reverbAppKey!,
+      );
+    }
+  }
 
   Future<Either<PairingFailure, List<PairedSystem>>> _loadAll() async {
     final readResult = await _secureStorage.read(key: _storageKey);

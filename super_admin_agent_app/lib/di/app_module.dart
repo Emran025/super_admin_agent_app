@@ -115,11 +115,14 @@ Future<void> setupDependencies() async {
 
   // 10. Agent WebSocket service — maintains persistent connection to Reverb.
   //     Replaces Firebase Cloud Messaging as the command delivery channel.
+  //     HttpClientFactory is injected so _fetchChannelAuth can make ECDSA-signed
+  //     requests to the broadcasting auth endpoint.
   getIt.registerLazySingleton<AgentWebSocketService>(
     () => AgentWebSocketService(
       router: getIt<WsMessageRouter>(),
       registry: getIt<PairedSystemRegistry>(),
       secureStorage: getIt<SecureStorageService>(),
+      clientFactory: getIt<HttpClientFactory>(),
     ),
   );
 

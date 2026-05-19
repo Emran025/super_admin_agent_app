@@ -58,6 +58,12 @@ class PairingTokenDto {
 }
 
 /// Maps JSON ↔ [PairedSystem] for persistence and server response parsing.
+///
+/// The server pairing response includes Reverb WebSocket connection parameters
+/// (reverb_host, reverb_port, reverb_app_key) in addition to the agent identity
+/// fields. These are parsed here and stored separately in secure storage by
+/// [PairingRepositoryImpl.registerWithServer] so that [AgentWebSocketService]
+/// can read them at startup.
 class PairedSystemDto {
   final String agentId;
   final String systemId;
@@ -66,6 +72,13 @@ class PairedSystemDto {
   final List<String> grantedCapabilities;
   final String pairedAt;
 
+  // Reverb WebSocket connection parameters — present only in server response,
+  // not persisted as part of the PairedSystem entity (stored separately in
+  // secure storage by PairingRepositoryImpl).
+  final String? reverbHost;
+  final int? reverbPort;
+  final String? reverbAppKey;
+
   const PairedSystemDto({
     required this.agentId,
     required this.systemId,
@@ -73,6 +86,9 @@ class PairedSystemDto {
     required this.baseUrl,
     required this.grantedCapabilities,
     required this.pairedAt,
+    this.reverbHost,
+    this.reverbPort,
+    this.reverbAppKey,
   });
 
   factory PairedSystemDto.fromJson(Map<String, dynamic> map) {
@@ -84,6 +100,9 @@ class PairedSystemDto {
       grantedCapabilities:
           List<String>.from(map['granted_capabilities'] as List),
       pairedAt: map['paired_at'] as String,
+      reverbHost: map['reverb_host'] as String?,
+      reverbPort: map['reverb_port'] as int?,
+      reverbAppKey: map['reverb_app_key'] as String?,
     );
   }
 
