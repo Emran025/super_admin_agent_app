@@ -248,9 +248,9 @@
 </head>
 <body>
 
-    @if (session('success'))
-        <div class="alert-success">{{ session('success') }}</div>
-    @endif
+    <?php if(session('success')): ?>
+        <div class="alert-success"><?php echo e(session('success')); ?></div>
+    <?php endif; ?>
 
     <div class="header">
         <h1>Super Admin Agent &mdash; Testbed</h1>
@@ -260,12 +260,12 @@
         </p>
     </div>
 
-    @if ($isAgentConnected)
+    <?php if($isAgentConnected): ?>
         <div class="status-banner connected">
             <span class="status-dot connected"></span>
-            <span>Mobile Agent connected: <strong>{{ $agentId }}</strong> (WebSocket channel occupied & active)</span>
+            <span>Mobile Agent connected: <strong><?php echo e($agentId); ?></strong> (WebSocket channel occupied & active)</span>
         </div>
-    @else
+    <?php else: ?>
         <div class="status-banner disconnected">
             <span class="status-dot disconnected"></span>
             <span>
@@ -273,11 +273,11 @@
                 Please pair/start the mobile app and connect to Reverb.
             </span>
         </div>
-    @endif
+    <?php endif; ?>
 
     <div class="cards">
 
-        {{-- ─── SMS Gateway ────────────────────────────────────────────────── --}}
+        
         <div class="card">
             <div>
                 <div class="card-icon green" aria-hidden="true">
@@ -315,12 +315,12 @@
                 </li>
             </ul>
 
-            <a href="{{ route('testbed.sms.phone') }}" class="btn green">
+            <a href="<?php echo e(route('testbed.sms.phone')); ?>" class="btn green">
                 Test SMS Gateway &rarr;
             </a>
         </div>
 
-        {{-- ─── 2FA Push ───────────────────────────────────────────────────── --}}
+        
         <div class="card">
             <div>
                 <div class="card-icon blue" aria-hidden="true">
@@ -357,14 +357,14 @@
                 </li>
             </ul>
 
-            <a href="{{ route('testbed.push.login') }}" class="btn blue">
+            <a href="<?php echo e(route('testbed.push.login')); ?>" class="btn blue">
                 Test 2FA Push &rarr;
             </a>
         </div>
 
     </div>
 
-    {{-- ─── System Pairing (full width) ──────────────────────────────────── --}}
+    
     <div class="cards-wide">
         <div class="card card-full">
             <div>
@@ -402,7 +402,7 @@
                 </li>
             </ul>
 
-            <a href="{{ route('testbed.pairing') }}" class="btn purple">
+            <a href="<?php echo e(route('testbed.pairing')); ?>" class="btn purple">
                 Manage External Systems &rarr;
             </a>
         </div>
@@ -414,3 +414,4 @@
 
 </body>
 </html>
+<?php /**PATH C:\xampp\htdocs\SuperAdmin\otp_server\resources\views/testbed/hub.blade.php ENDPATH**/ ?>
