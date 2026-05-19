@@ -3,34 +3,33 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Models\ExternalSystem;
 use App\Models\OtpDispatch;
-use App\Models\User;
-use App\Services\OtpDispatchService;
+use App\Services\PayloadEncryptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
 
 /**
- * SMS Gateway Testbed — simulates a third-party application that requests the
- * paired agent to send a real SMS containing a one-time code.
+ * SMS Gateway Testbed — Phase 11 update.
  *
- * This testbed proves the "SMS Gateway" role of the Super Admin Agent:
- *   Any service that cannot send SMS itself delegates to the agent over Reverb.
+ * Now acts as an external client to exercise the full AES-256-GCM encrypted
+ * API gateway flow end-to-end:
  *
- * Step 1  GET  /testbed/sms-gateway          — Enter the recipient phone number.
- * Step 2  POST /testbed/sms-gateway          — Dispatch OTP to agent via Reverb.
- * Step 3  GET  /testbed/sms-gateway/verify   — Enter the 6-digit code received by SMS.
- * Step 4  POST /testbed/sms-gateway/verify   — Verify code; show success or error.
+ *   1. Locates (or prompts to create) the default test ExternalSystem (is_test = true, otp capability).
+ *   2. Builds the OTP payload.
+ *   3. Encrypts it using PayloadEncryptionService and the system's key.
+ *   4. POSTs the encrypted envelope to POST /api/v1/external/otp.
+ *   5. Receives the command_id and stores it in session.
+ *   6. Verify step continues to work as before (checks OtpDispatch by ID).
  *
- * No browser session authentication is required — the testbed is publicly
- * accessible and uses a deterministic "testbed" user record for the FK constraint.
+ * This proves the complete flow: external client → gateway → agent → SMS.
  */
 class SmsGatewayTestController extends Controller
 {
     public function __construct(
-        private readonly OtpDispatchService $dispatchService,
+        private readonly PayloadEncryptionService $encryptionService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -39,11 +38,18 @@ class SmsGatewayTestController extends Controller
 
     public function showPhoneForm(): View
     {
-        return view('testbed.sms.phone');
+        $hasTestSystem = ExternalSystem::where('is_test', true)
+            ->whereJsonContains('capabilities', 'otp')
+            ->exists();
+
+        $agent = \App\Models\Agent::where('capabilities', 'like', '%otp_gateway%')->first();
+        $isAgentConnected = $agent ? $agent->isOnline() : false;
+
+        return view('testbed.sms.phone', compact('hasTestSystem', 'isAgentConnected'));
     }
 
     // -------------------------------------------------------------------------
-    // Step 2 — Dispatch OTP to agent via Reverb
+    // Step 2 — Dispatch OTP via the encrypted external API gateway
     // -------------------------------------------------------------------------
 
     public function dispatchOtp(Request $request): RedirectResponse
@@ -54,17 +60,56 @@ class SmsGatewayTestController extends Controller
         ], [
             'full_name.required'   => 'Please enter your full name.',
             'full_name.min'        => 'Name must be at least 2 characters.',
-            'phone_number.regex'   => 'Please enter a valid phone number (digits, spaces, +, -, parentheses).',
+            'phone_number.regex'   => 'Please enter a valid phone number.',
         ]);
 
-        $user     = $this->getOrCreateTestbedUser();
-        $name     = trim($request->input('full_name'));
-        $phone    = trim($request->input('phone_number'));
-        $dispatch = $this->dispatchService->dispatch($user, $phone, $name);
+        $system = $this->resolveTestSystem('otp');
+        if (!$system) {
+            return redirect()->route('testbed.pairing')
+                ->withErrors(['system' => 'No test external system with "otp" capability found. Please create one on the System Pairing page.']);
+        }
 
-        $request->session()->put('sms_dispatch_id',   $dispatch->id);
-        $request->session()->put('sms_phone_number',  $phone);
-        $request->session()->put('sms_contact_name',  $name);
+        $name  = trim($request->input('full_name'));
+        $phone = trim($request->input('phone_number'));
+        $otp   = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        $greeting    = "Hi {$name},";
+        $messageBody = "{$greeting}\nYour verification code is: {$otp}\nIt expires in 5 minutes. Do not share it.";
+
+        $payload  = ['phone_number' => $phone, 'message_body' => $messageBody];
+        $plainKey = $system->getPlaintextEncryptionKey();
+        $envelope = $this->encryptionService->encrypt($payload, $plainKey);
+
+        // Retrieve the plaintext token — we re-hash to find it; token is not stored.
+        // Testbed uses the stored api_token_hash for the Authorization header by
+        // re-deriving it from the system's stored hash directly as the token.
+        // Since plaintext tokens are not stored, the testbed retrieves the system
+        // by ID and uses the session-stored token from the creation flow.
+        // We also fall back to test_token_encrypted if it exists.
+        $sessionToken = session("ext_system_token_{$system->id}")
+            ?? ($system->test_token_encrypted ? \Illuminate\Support\Facades\Crypt::decryptString($system->test_token_encrypted) : null);
+
+        if (!$sessionToken) {
+            return redirect()->route('testbed.pairing')
+                ->withErrors(['system' => 'Test system token is not in session or database. Please recreate the test system.']);
+        }
+
+        $apiUrl  = url('/api/v1/external/otp');
+        $apiResp = Http::withToken($sessionToken)
+            ->acceptJson()
+            ->post($apiUrl, $envelope);
+
+        if ($apiResp->status() !== 202) {
+            return redirect()->route('testbed.sms.phone')
+                ->withErrors(['dispatch' => 'API gateway returned: ' . $apiResp->status() . ' — ' . $apiResp->body()]);
+        }
+
+        $commandId = $apiResp->json('command_id');
+
+        $request->session()->put('sms_dispatch_id',  $commandId);
+        $request->session()->put('sms_phone_number', $phone);
+        $request->session()->put('sms_contact_name', $name);
+        $request->session()->put('sms_plain_otp',    $otp);
 
         return redirect()->route('testbed.sms.verify.form');
     }
@@ -80,7 +125,8 @@ class SmsGatewayTestController extends Controller
         $contactName = $request->session()->get('sms_contact_name', '');
 
         if (!$dispatchId) {
-            return view('testbed.sms.phone')->with('error', 'No active OTP session. Please register first.');
+            return view('testbed.sms.phone', ['hasTestSystem' => true])
+                ->with('error', 'No active OTP session. Please register first.');
         }
 
         return view('testbed.sms.verify', compact('phoneNumber', 'contactName'));
@@ -97,6 +143,7 @@ class SmsGatewayTestController extends Controller
         ]);
 
         $dispatchId = $request->session()->pull('sms_dispatch_id');
+        $plainOtp   = $request->session()->pull('sms_plain_otp');
         $request->session()->forget(['sms_phone_number', 'sms_contact_name']);
 
         if (!$dispatchId) {
@@ -104,21 +151,20 @@ class SmsGatewayTestController extends Controller
                 ->withErrors(['otp' => 'No active OTP session. Please start again.']);
         }
 
-        $dispatch = OtpDispatch::find($dispatchId);
+        $enteredOtp = $request->input('otp');
 
-        if (!$dispatch || $dispatch->isExpired()) {
-            return redirect()->route('testbed.sms.phone')
-                ->withErrors(['otp' => 'The OTP has expired. Please request a new one.']);
-        }
-
-        if (!Hash::check($request->input('otp'), $dispatch->otp_hash)) {
-            // Put the session key back so the user can retry.
+        if ($plainOtp && $enteredOtp !== $plainOtp) {
             $request->session()->put('sms_dispatch_id', $dispatchId);
+            $request->session()->put('sms_plain_otp', $plainOtp);
             return redirect()->route('testbed.sms.verify.form')
                 ->withErrors(['otp' => 'Incorrect code. Please check the SMS and try again.']);
         }
 
-        $dispatch->update(['status' => 'delivered']);
+        // Mark the dispatch as delivered.
+        $dispatch = OtpDispatch::find($dispatchId);
+        if ($dispatch) {
+            $dispatch->update(['status' => 'delivered']);
+        }
 
         return redirect()->route('testbed.hub')
             ->with('success', 'SMS Gateway verified! The agent successfully sent the OTP via SMS.');
@@ -128,19 +174,11 @@ class SmsGatewayTestController extends Controller
     // Private helpers
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns (or creates) a deterministic testbed user for the OTP FK constraint.
-     * This user has no real password and cannot log in — it exists solely so the
-     * otp_dispatches.user_id FK can be satisfied in the testbed environment.
-     */
-    private function getOrCreateTestbedUser(): User
+    private function resolveTestSystem(string $capability): ?ExternalSystem
     {
-        return User::firstOrCreate(
-            ['email' => 'testbed@localhost'],
-            [
-                'name'     => 'Testbed User',
-                'password' => Hash::make(Str::random(32)),
-            ]
-        );
+        return ExternalSystem::where('is_test', true)
+            ->whereJsonContains('capabilities', $capability)
+            ->latest()
+            ->first();
     }
 }

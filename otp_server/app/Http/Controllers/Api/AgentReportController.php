@@ -92,6 +92,8 @@ class AgentReportController extends Controller
             return response()->json(['error' => 'Signature verification failed.'], 401);
         }
 
+        $agent->update(['last_seen_at' => now()]);
+
         // Gate 5 — Command ownership and existence
         $dispatch = OtpDispatch::find($commandId);
         if ($dispatch === null) {

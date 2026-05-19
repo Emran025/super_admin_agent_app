@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\AgentReportController;
 use App\Http\Controllers\Api\BroadcastingAuthController;
+use App\Http\Controllers\Api\External\LoginApprovalController;
+use App\Http\Controllers\Api\External\OtpGatewayController;
 use App\Http\Controllers\Api\OtpCommandController;
 use App\Http\Controllers\Api\PairingController;
 use App\Http\Controllers\Api\PushChallengeController;
@@ -14,36 +16,58 @@ use Illuminate\Support\Facades\Route;
 |
 | All routes here are prefixed with /api automatically by Laravel.
 |
-| Contract (must match the Flutter data layer):
+| ── Agent Routes (ECDSA-signed) ──────────────────────────────────────────
 |
 |   POST  /api/v1/pair
 |     ↳ PairingController::pair()
-|     ↳ Body: {pairing_token, public_key_base64, public_key_id}
-|     ↳ Response includes Reverb connection parameters (host, port, app_key)
 |
 |   POST  /api/v1/broadcasting/auth
 |     ↳ BroadcastingAuthController::auth()
-|     ↳ Authenticates agent to subscribe to private-agent.{system_id} channel
-|     ↳ Uses ECDSA signed request headers (X-Agent-Public-Key-Id, X-Agent-Signature, etc.)
 |
 |   GET   /api/v1/otp-commands/{commandId}
 |     ↳ OtpCommandController::show()
-|     ↳ Returns full OtpDispatchCommandDto (agent fetches this after WebSocket trigger)
 |
 |   POST  /api/v1/otp-commands/{commandId}/report
 |     ↳ AgentReportController::report()
-|     ↳ Body: {command_id, status, reported_at, nonce, agent_public_key_id, signature}
-|     ↳ Full ECDSA-SHA256 P-256 signature verification + nonce replay prevention
+|
+|   POST  /api/v1/push-challenges/{challengeId}/respond
+|     ↳ PushChallengeController::respond()
+|
+| ── External Gateway Routes (AES-256-GCM encrypted) ─────────────────────
+|
+|   POST  /api/v1/external/otp
+|     ↳ OtpGatewayController::dispatch()
+|     ↳ Middleware: auth.external, capability:otp
+|     ↳ Body: { encrypted_payload, iv, tag }
+|     ↳ Decrypted: { phone_number, message_body }
+|     ↳ Response: 202 { command_id }
+|
+|   POST  /api/v1/external/login
+|     ↳ LoginApprovalController::challenge()
+|     ↳ Middleware: auth.external, capability:super_admin_login
+|     ↳ Body: { encrypted_payload, iv, tag }
+|     ↳ Decrypted: { username, context_label? }
+|     ↳ Response: 202 { challenge_id }
 |
 */
 
 Route::prefix('v1')->group(function (): void {
+
+    // ── Agent routes (no auth middleware — ECDSA signatures protect these) ──
     Route::post('/pair', [PairingController::class, 'pair']);
-
     Route::post('/broadcasting/auth', [BroadcastingAuthController::class, 'auth']);
-
     Route::get('/otp-commands/{commandId}', [OtpCommandController::class, 'show']);
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);
-
     Route::post('/push-challenges/{challengeId}/respond', [PushChallengeController::class, 'respond']);
+
+    // ── External system gateway (Constraint 2.1 — AES-256-GCM payload encryption) ──
+    Route::prefix('external')
+        ->middleware('auth.external')
+        ->group(function (): void {
+            Route::post('/otp',   [OtpGatewayController::class, 'dispatch'])
+                 ->middleware('capability:otp');
+
+            Route::post('/login', [LoginApprovalController::class, 'challenge'])
+                 ->middleware('capability:super_admin_login');
+        });
 });

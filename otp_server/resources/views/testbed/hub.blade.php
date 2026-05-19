@@ -194,6 +194,56 @@
             text-align: center;
             line-height: 1.6;
         }
+
+        .card-icon.purple { background: #1e0a3c; border: 1px solid #7c3aed; }
+        .card-badge.purple { background: #1e0a3c; color: #c4b5fd; border: 1px solid #7c3aed; }
+        .btn.purple { background: #7c3aed; color: #fff; }
+        .btn.purple:hover { filter: brightness(1.1); }
+
+        .cards-wide { max-width: 820px; width: 100%; margin-top: 1.5rem; }
+        .card-full { width: 100%; }
+
+        .status-banner {
+            width: 100%;
+            max-width: 820px;
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .status-banner.connected {
+            background: rgba(5, 46, 22, 0.4);
+            border: 1px solid #166534;
+            color: #4ade80;
+        }
+
+        .status-banner.disconnected {
+            background: rgba(153, 27, 27, 0.4);
+            border: 1px solid #991b1b;
+            color: #f87171;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .status-dot.connected {
+            background: #4ade80;
+            box-shadow: 0 0 8px #4ade80;
+        }
+
+        .status-dot.disconnected {
+            background: #f87171;
+            box-shadow: 0 0 8px #f87171;
+        }
     </style>
 </head>
 <body>
@@ -209,6 +259,21 @@
             capability of the paired agent.
         </p>
     </div>
+
+    @if ($isAgentConnected)
+        <div class="status-banner connected">
+            <span class="status-dot connected"></span>
+            <span>Mobile Agent connected: <strong>{{ $agentId }}</strong> (WebSocket channel occupied & active)</span>
+        </div>
+    @else
+        <div class="status-banner disconnected">
+            <span class="status-dot disconnected"></span>
+            <span>
+                Mobile Agent offline or disconnected. Dispatch functions will remain pending.
+                Please pair/start the mobile app and connect to Reverb.
+            </span>
+        </div>
+    @endif
 
     <div class="cards">
 
@@ -288,8 +353,47 @@
 
     </div>
 
+    {{-- ─── System Pairing (full width) ──────────────────────────────────── --}}
+    <div class="cards-wide">
+        <div class="card card-full">
+            <div>
+                <div class="card-icon purple">🔗</div>
+            </div>
+            <div>
+                <span class="card-badge purple">external_gateway</span>
+            </div>
+            <h2>System Pairing</h2>
+            <p>
+                Register a test external system and obtain its AES-256-GCM encryption key
+                and API bearer token. The testbed SMS and 2FA flows use this system to
+                exercise the full zero-trust encrypted API gateway end-to-end.
+            </p>
+
+            <div class="divider">Flow</div>
+
+            <ul class="steps">
+                <li>
+                    <span class="step-num">1</span>
+                    Create a test external system with selected capabilities
+                </li>
+                <li>
+                    <span class="step-num">2</span>
+                    Receive the API token &amp; AES-256 key (shown once, QR available)
+                </li>
+                <li>
+                    <span class="step-num">3</span>
+                    SMS Gateway and 2FA testbeds encrypt their payloads using this key
+                </li>
+            </ul>
+
+            <a href="{{ route('testbed.pairing') }}" class="btn purple">
+                Manage External Systems &rarr;
+            </a>
+        </div>
+    </div>
+
     <p class="footer-note">
-        Zero-trust &bull; ECDSA P-256 signed &bull; Self-hosted Reverb WebSocket &bull; No FCM
+        Zero-trust &bull; AES-256-GCM payload encryption &bull; ECDSA P-256 signed &bull; Self-hosted Reverb WebSocket &bull; No FCM
     </p>
 
 </body>

@@ -79,6 +79,8 @@ class BroadcastingAuthController extends Controller
             return response()->json(['error' => 'Invalid signature.'], 403);
         }
 
+        $agent->update(['last_seen_at' => now()]);
+
         // Compute Pusher private channel auth token.
         // Formula: HMAC-SHA256(appSecret, "{socketId}:{channelName}") prefixed with appKey.
         $secret    = config('reverb.apps.apps.0.secret', env('REVERB_APP_SECRET'));

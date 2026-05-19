@@ -177,6 +177,48 @@
         }
 
         .flow-note strong { color: #94a3b8; }
+
+        .status-banner {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-banner.connected {
+            background: rgba(5, 46, 22, 0.4);
+            border: 1px solid #166534;
+            color: #4ade80;
+        }
+
+        .status-banner.disconnected {
+            background: rgba(153, 27, 27, 0.4);
+            border: 1px solid #991b1b;
+            color: #f87171;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.connected {
+            background: #4ade80;
+            box-shadow: 0 0 6px #4ade80;
+        }
+
+        .status-dot.disconnected {
+            background: #f87171;
+            box-shadow: 0 0 6px #f87171;
+        }
     </style>
 </head>
 <body>
@@ -191,6 +233,18 @@
             Enter the dummy credentials to trigger a 2FA push challenge. Your paired
             agent will receive the challenge via WebSocket and must approve it.
         </p>
+
+        @if ($isAgentConnected)
+            <div class="status-banner connected">
+                <span class="status-dot connected"></span>
+                <span>Mobile Agent: Connected (Online)</span>
+            </div>
+        @else
+            <div class="status-banner disconnected">
+                <span class="status-dot disconnected"></span>
+                <span>Mobile Agent: Offline (Commands will remain pending)</span>
+            </div>
+        @endif
 
         <div class="credentials-hint">
             <div class="cred">

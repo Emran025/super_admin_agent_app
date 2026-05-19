@@ -22,19 +22,27 @@ class OtpDispatch extends Model
 
     protected $fillable = [
         'user_id',
+        'external_system_id',
         'phone_number',
         'otp_hash',
         'status',
         'expires_at',
+        'sandbox_log',
     ];
 
     protected $casts = [
-        'expires_at' => 'datetime',
+        'expires_at'  => 'datetime',
+        'sandbox_log' => 'boolean',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function externalSystem(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\ExternalSystem::class);
     }
 
     public function isPending(): bool

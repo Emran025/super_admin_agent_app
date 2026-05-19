@@ -3,44 +3,35 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Models\ExternalSystem;
 use App\Models\TwoFactorChallenge;
-use App\Services\TwoFactorChallengeService;
+use App\Services\PayloadEncryptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
 
 /**
- * 2FA Push Testbed — simulates an admin control panel that requires push
- * approval from the paired Super Admin Agent before granting access.
+ * 2FA Push Testbed — Phase 11 update.
  *
- * This testbed proves the "Personal Authenticator" role of the agent:
- *   Login credentials are correct, but the final approval comes from the device.
+ * Now acts as an external client to exercise the full AES-256-GCM encrypted
+ * API gateway flow end-to-end:
  *
- * Step 1  GET  /testbed/push-2fa             — Dummy login form (username + password).
- * Step 2  POST /testbed/push-2fa             — Validate credentials, issue push challenge.
- * Step 3  GET  /testbed/push-2fa/waiting     — "Waiting for approval" page.
- *                                              Browser subscribes to Reverb via Pusher JS.
- *                                              Redirects automatically when agent responds.
+ *   1. Validates the dummy credentials (admin / testbed).
+ *   2. Locates the default test ExternalSystem (is_test = true, super_admin_login capability).
+ *   3. Encrypts the login payload using the system's AES-256 key.
+ *   4. POSTs the encrypted envelope to POST /api/v1/external/login.
+ *   5. Receives challenge_id, stores it in session, redirects to waiting page.
  *
- * The agent receives the TwoFactorChallengeIssued event on its private Reverb channel,
- * shows an "Approve / Reject" prompt, and POSTs a signed decision to:
- *   POST /api/v1/push-challenges/{challengeId}/respond
- *
- * The server broadcasts TwoFactorDecisionMade on the public channel
- * push-2fa-result.{challengeId} which the waiting browser JS listens to.
- *
- * Dummy credentials (hardcoded for the testbed — not a real account):
- *   Username: admin
- *   Password: testbed
+ * Dummy credentials: username=admin / password=testbed
  */
 class PushTwoFactorTestController extends Controller
 {
-    // Dummy credentials — the testbed has no real user accounts.
     private const DUMMY_USERNAME = 'admin';
     private const DUMMY_PASSWORD = 'testbed';
 
     public function __construct(
-        private readonly TwoFactorChallengeService $challengeService,
+        private readonly PayloadEncryptionService $encryptionService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -49,11 +40,15 @@ class PushTwoFactorTestController extends Controller
 
     public function showLoginForm(): View
     {
-        return view('testbed.push.login');
+        $agent = \App\Models\Agent::where('capabilities', 'like', '%two_fa%')->first()
+            ?? \App\Models\Agent::first();
+        $isAgentConnected = $agent ? $agent->isOnline() : false;
+
+        return view('testbed.push.login', compact('isAgentConnected'));
     }
 
     // -------------------------------------------------------------------------
-    // Step 2 — Validate credentials and issue push challenge
+    // Step 2 — Validate credentials and issue push challenge via encrypted API
     // -------------------------------------------------------------------------
 
     public function submitLogin(Request $request): RedirectResponse
@@ -72,12 +67,43 @@ class PushTwoFactorTestController extends Controller
             ])->withInput(['username' => $request->input('username')]);
         }
 
-        $challenge = $this->challengeService->issue(
-            challengedUsername: $request->input('username'),
-            expirySeconds:      120,
-        );
+        $system = $this->resolveTestSystem('super_admin_login');
 
-        $request->session()->put('push_challenge_id', $challenge->id);
+        if (!$system) {
+            return redirect()->route('testbed.pairing')
+                ->withErrors(['system' => 'No test external system with "super_admin_login" capability found. Please create one on the System Pairing page.']);
+        }
+
+        $sessionToken = session("ext_system_token_{$system->id}")
+            ?? ($system->test_token_encrypted ? \Illuminate\Support\Facades\Crypt::decryptString($system->test_token_encrypted) : null);
+
+        if (!$sessionToken) {
+            return redirect()->route('testbed.pairing')
+                ->withErrors(['system' => 'Test system token is not in session or database. Please recreate the test system from the pairing page.']);
+        }
+
+        $username = $request->input('username');
+        $payload  = [
+            'username'      => $username,
+            'context_label' => 'Login attempt from Testbed browser',
+        ];
+
+        $plainKey = $system->getPlaintextEncryptionKey();
+        $envelope = $this->encryptionService->encrypt($payload, $plainKey);
+
+        $apiUrl  = url('/api/v1/external/login');
+        $apiResp = Http::withToken($sessionToken)
+            ->acceptJson()
+            ->post($apiUrl, $envelope);
+
+        if ($apiResp->status() !== 202) {
+            return back()->withErrors([
+                'credentials' => 'API gateway returned: ' . $apiResp->status() . ' — ' . $apiResp->body(),
+            ]);
+        }
+
+        $challengeId = $apiResp->json('challenge_id');
+        $request->session()->put('push_challenge_id', $challengeId);
 
         return redirect()->route('testbed.push.waiting');
     }
@@ -103,8 +129,6 @@ class PushTwoFactorTestController extends Controller
                 ->withErrors(['credentials' => 'Challenge not found. Please try again.']);
         }
 
-        // If the challenge is already resolved (agent responded before the page loaded),
-        // skip the waiting page and go straight to the result.
         if ($challenge->status === 'approved') {
             $request->session()->forget('push_challenge_id');
             return redirect()->route('testbed.hub')
@@ -118,17 +142,16 @@ class PushTwoFactorTestController extends Controller
         }
 
         return view('testbed.push.waiting', [
-            'challengeId'   => $challengeId,
-            'expiresAt'     => $challenge->expires_at->toIso8601String(),
-            'reverbHost'    => config('otp_server.reverb_host', 'localhost'),
-            'reverbPort'    => config('otp_server.reverb_port', 8080),
-            'reverbAppKey'  => config('otp_server.reverb_app_key', ''),
+            'challengeId'  => $challengeId,
+            'expiresAt'    => $challenge->expires_at->toIso8601String(),
+            'reverbHost'   => config('otp_server.reverb_host', 'localhost'),
+            'reverbPort'   => config('otp_server.reverb_port', 8080),
+            'reverbAppKey' => config('otp_server.reverb_app_key', ''),
         ]);
     }
 
     // -------------------------------------------------------------------------
-    // AJAX poll endpoint — browser polls this to detect decisions made before
-    // the Reverb WebSocket is established (race-condition safety net).
+    // AJAX poll endpoint — safety-net for race-condition before Reverb connects.
     // -------------------------------------------------------------------------
 
     public function pollStatus(Request $request): \Illuminate\Http\JsonResponse
@@ -148,5 +171,17 @@ class PushTwoFactorTestController extends Controller
             'expired'    => $challenge->isExpired(),
             'expires_at' => $challenge->expires_at->toIso8601String(),
         ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    private function resolveTestSystem(string $capability): ?ExternalSystem
+    {
+        return ExternalSystem::where('is_test', true)
+            ->whereJsonContains('capabilities', $capability)
+            ->latest()
+            ->first();
     }
 }

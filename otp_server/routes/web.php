@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Web\ExternalSystemPairingController;
 use App\Http\Controllers\Web\PushTwoFactorTestController;
 use App\Http\Controllers\Web\SmsGatewayTestController;
 use Illuminate\Support\Facades\Route;
@@ -10,25 +11,51 @@ Route::get('/', fn () => redirect()->route('testbed.hub'));
 |--------------------------------------------------------------------------
 | Testbed Hub
 |--------------------------------------------------------------------------
+*/
+
+Route::get('/testbed', function () {
+    $agent = \App\Models\Agent::first();
+    $isAgentConnected = $agent ? $agent->isOnline() : false;
+    $agentId = $agent ? $agent->agent_id : null;
+    return view('testbed.hub', compact('isAgentConnected', 'agentId'));
+})->name('testbed.hub');
+
+/*
+|--------------------------------------------------------------------------
+| System Pairing Testbed  —  /testbed/system-pairing
+|--------------------------------------------------------------------------
 |
-| Landing page with two clear sections, each explaining the role being
-| tested and linking to the dedicated testbed for that role.
+| UI to create / manage "Test External Systems" (is_test = true).
+| Generates a system_id, API token, and AES-256 encryption key shown once.
+| Proves the External Gateway pairing ceremony before running the SMS or 2FA
+| testbeds (which now encrypt their payloads and call /api/v1/external/...).
+|
+|   GET   /testbed/system-pairing         index()   — list test systems
+|   POST  /testbed/system-pairing         store()   — create test system
+|   POST  /testbed/system-pairing/{id}/delete  destroy() — delete test system
 |
 */
 
-Route::get('/testbed', fn () => view('testbed.hub'))->name('testbed.hub');
+Route::prefix('testbed/system-pairing')->group(function (): void {
+    Route::get('/',            [ExternalSystemPairingController::class, 'index'])
+         ->name('testbed.pairing');
+
+    Route::post('/',           [ExternalSystemPairingController::class, 'store'])
+         ->name('testbed.pairing.store');
+
+    Route::post('/{id}/delete', [ExternalSystemPairingController::class, 'destroy'])
+         ->name('testbed.pairing.destroy');
+});
 
 /*
 |--------------------------------------------------------------------------
 | SMS Gateway Testbed  —  /testbed/sms-gateway
 |--------------------------------------------------------------------------
 |
-| Simulates a third-party application that cannot send SMS itself and
-| delegates to the paired Super Admin Agent as an SMS gateway.
-|
-| Role under test  : Agent as SMS Gateway (otp_gateway capability)
-| Agent action     : Agent receives OTP dispatch via Reverb and sends real SMS
-| User action      : Enter recipient phone → receive SMS → enter code → verified
+| Simulates a third-party application that delegates SMS sending to the agent.
+| Updated (Phase 11): acts as an external client — reads the default test
+| ExternalSystem, encrypts the payload with AES-256-GCM, and calls
+| POST /api/v1/external/otp to exercise the full encrypted gateway flow.
 |
 |   GET  /testbed/sms-gateway          showPhoneForm()
 |   POST /testbed/sms-gateway          dispatchOtp()
@@ -56,19 +83,14 @@ Route::prefix('testbed/sms-gateway')->group(function (): void {
 | 2FA Push Testbed  —  /testbed/push-2fa
 |--------------------------------------------------------------------------
 |
-| Simulates an admin control panel that requires explicit push approval
-| from the paired Super Admin Agent before granting login access.
-|
-| Role under test  : Agent as Personal Authenticator (two_fa capability)
-| Agent action     : Agent receives challenge via Reverb → shows Approve/Reject
-| User action      : Enter dummy credentials → page waits → agent approves → access granted
-|
-| Dummy credentials: username=admin / password=testbed
+| Simulates an admin control panel requiring push approval from the agent.
+| Updated (Phase 11): acts as an external client — encrypts the payload and
+| calls POST /api/v1/external/login to verify the full gateway flow.
 |
 |   GET  /testbed/push-2fa             showLoginForm()
 |   POST /testbed/push-2fa             submitLogin()
-|   GET  /testbed/push-2fa/waiting     showWaiting()   ← browser subscribes to Reverb here
-|   GET  /testbed/push-2fa/poll        pollStatus()    ← AJAX safety-net
+|   GET  /testbed/push-2fa/waiting     showWaiting()
+|   GET  /testbed/push-2fa/poll        pollStatus()
 |
 */
 
