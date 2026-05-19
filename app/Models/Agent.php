@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Represents a mobile agent that has completed the pairing ceremony.
@@ -32,11 +31,6 @@ class Agent extends Model
         'capabilities' => 'array',
         'paired_at'    => 'datetime',
     ];
-
-    public function otpDispatches(): HasMany
-    {
-        return $this->hasMany(OtpDispatch::class, 'user_id');
-    }
 
     /**
      * The private Reverb channel this agent listens on.

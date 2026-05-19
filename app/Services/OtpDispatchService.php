@@ -51,7 +51,7 @@ class OtpDispatchService
             'phone_number' => $phoneNumber,
             'otp_hash'     => Hash::make($plainOtp),
             'status'       => 'pending',
-            'expires_at'   => now()->addMinutes(config('otp_server.expiry_minutes', 5)),
+            'expires_at'   => now()->addMinutes(config('otp_server.otp_expiry_minutes', 5)),
         ]);
 
         broadcast(new AgentCommandDispatched(

@@ -37,4 +37,17 @@ return [
     |
     */
     'otp_expiry_minutes' => (int) env('OTP_EXPIRY_MINUTES', 5),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reverb Connection Parameters (returned to agent during pairing)
+    |--------------------------------------------------------------------------
+    |
+    | These values are read via config() so they are cached correctly in
+    | production. Never use env() directly in controllers.
+    |
+    */
+    'reverb_host'    => env('REVERB_HOST', 'localhost'),
+    'reverb_port'    => (int) env('REVERB_PORT', 8080),
+    'reverb_app_key' => env('REVERB_APP_KEY', ''),
 ];

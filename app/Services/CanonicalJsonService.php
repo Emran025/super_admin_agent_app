@@ -30,6 +30,9 @@ class CanonicalJsonService
             }
         }
 
-        return json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        // PHP encodes an empty [] as "[]", but Dart's jsonEncode({}) produces "{}".
+        // Cast to stdClass so json_encode always emits an object literal for maps,
+        // preserving contract parity with the Flutter signing layer (Constraint 2.4).
+        return json_encode(empty($data) ? new \stdClass() : $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 }

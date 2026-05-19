@@ -75,9 +75,9 @@ class PairingController extends Controller
             'base_url'             => config('app.url'),
             'granted_capabilities' => $agent->capabilities,
             'paired_at'            => $agent->paired_at->toIso8601String(),
-            'reverb_host'          => env('REVERB_HOST', 'localhost'),
-            'reverb_port'          => (int) env('REVERB_PORT', 8080),
-            'reverb_app_key'       => env('REVERB_APP_KEY', ''),
+            'reverb_host'          => config('otp_server.reverb_host', 'localhost'),
+            'reverb_port'          => (int) config('otp_server.reverb_port', 8080),
+            'reverb_app_key'       => config('otp_server.reverb_app_key', ''),
         ], 201);
     }
 }
