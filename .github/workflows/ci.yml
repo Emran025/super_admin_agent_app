@@ -1,0 +1,173 @@
+name: Server & Client CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  server_test:
+    name: PHPUnit + Security Gates
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: otp_server
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. PHP setup
+      # -----------------------------------------------------------------------
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, pdo_sqlite, openssl, sodium
+          coverage: none
+
+      # -----------------------------------------------------------------------
+      # 3. Composer cache + install
+      # -----------------------------------------------------------------------
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ hashFiles('otp_server/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-scripts --no-progress
+
+      # -----------------------------------------------------------------------
+      # 4. Environment bootstrap (CI-only, no real secrets)
+      # -----------------------------------------------------------------------
+      - name: Bootstrap .env for testing
+        run: |
+          cp .env.example .env.testing
+          echo "APP_KEY=base64:$(openssl rand -base64 32)" >> .env.testing
+          echo "OTP_PAIRING_TOKEN=ci-test-token-$(openssl rand -hex 8)" >> .env.testing
+
+      - name: Generate application key
+        run: php artisan key:generate --env=testing --ansi
+
+      # -----------------------------------------------------------------------
+      # 5. Run PHPUnit test suite (SQLite in-memory, FCM mocked)
+      # -----------------------------------------------------------------------
+      - name: Run PHPUnit tests
+        run: php artisan test --ansi
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
+
+      # -----------------------------------------------------------------------
+      # 6. Security gate — plaintext OTP must never appear in source
+      #
+      #    Scans factories and migrations for accidental plaintext OTP storage.
+      #    The OtpDispatchFactory intentionally uses Hash::make('123456') —
+      #    the grep pattern targets column assignments, not Hash::make() calls.
+      #    Any match causes the CI pipeline to fail.
+      # -----------------------------------------------------------------------
+      - name: Security gate — no plaintext OTP in factories
+        run: |
+          echo "Checking for plaintext OTP storage patterns..."
+          ! grep -rn "otp_plain\|raw_otp\|plaintext_otp\|'otp'\s*=>\s*'" \
+            database/factories/ \
+            || (echo "FAIL: Plaintext OTP detected in factories." && exit 1)
+          echo "PASS: No plaintext OTP found in factories."
+
+      # -----------------------------------------------------------------------
+      # 7. Security gate — nonce replay prevention must be present
+      #
+      #    Ensures the UsedNonce model and used_nonces table migration both
+      #    exist. Removing either would silently disable replay protection.
+      # -----------------------------------------------------------------------
+      - name: Security gate — nonce replay model exists
+        run: |
+          echo "Checking for UsedNonce model..."
+          test -f app/Models/UsedNonce.php \
+            || (echo "FAIL: UsedNonce model missing — replay protection removed." && exit 1)
+          echo "PASS: UsedNonce model present."
+
+      - name: Security gate — nonce replay migration exists
+        run: |
+          echo "Checking for used_nonces migration..."
+          ls database/migrations/*create_used_nonces* \
+            || (echo "FAIL: used_nonces migration missing." && exit 1)
+          echo "PASS: used_nonces migration present."
+
+      # -----------------------------------------------------------------------
+      # 8. Security gate — ECDSA verifier must not fall back to ED25519
+      #
+      #    The Phase 8 spec doc erroneously mentions ED25519. This gate
+      #    ensures no ED25519 verification code ever enters the codebase,
+      #    keeping SignatureVerifierService aligned with the Flutter agent
+      #    (prime256v1 ECDSA-SHA256 only).
+      # -----------------------------------------------------------------------
+      - name: Security gate — no ED25519 in signature verifier
+        run: |
+          echo "Checking SignatureVerifierService for ED25519 usage..."
+          ! grep -n "ED25519\|sodium_crypto_sign\|SODIUM_CRYPTO_SIGN" \
+            app/Services/SignatureVerifierService.php \
+            || (echo "FAIL: ED25519 code found in SignatureVerifierService — use ECDSA P-256." && exit 1)
+          echo "PASS: SignatureVerifierService uses ECDSA P-256 only."
+
+      # -----------------------------------------------------------------------
+      # 9. Security gate — P-256 SPKI header must match the known constant
+      #
+      #    This hex string is the exact DER header that produces a valid
+      #    P-256 SubjectPublicKeyInfo when prepended to the 65-byte EC point.
+      #    Any change to this string corrupts signature verification for all agents.
+      # -----------------------------------------------------------------------
+      - name: Security gate — P-256 SPKI header constant integrity
+        run: |
+          echo "Verifying P-256 SPKI DER header in SignatureVerifierService..."
+          grep -q "3059301306072a8648ce3d020106082a8648ce3d030107034200" \
+            app/Services/SignatureVerifierService.php \
+            || (echo "FAIL: P-256 SPKI header constant is missing or incorrect." && exit 1)
+          echo "PASS: P-256 SPKI header constant is correct."
+
+  client_test:
+    name: Flutter Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: super_admin_agent_app
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Flutter setup
+      # -----------------------------------------------------------------------
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      # -----------------------------------------------------------------------
+      # 3. Dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: flutter pub get
+
+      # -----------------------------------------------------------------------
+      # 4. Analyze & Test
+      # -----------------------------------------------------------------------
+      - name: Analyze code
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
