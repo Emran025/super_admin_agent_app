@@ -1,0 +1,15 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - avoid_print
+    - always_declare_return_types
+    - prefer_final_locals
+    - prefer_const_constructors
+    - avoid_dynamic_calls
+
+analyzer:
+  errors:
+    missing_return: error
+    unused_import: error
+    dead_code: warning
