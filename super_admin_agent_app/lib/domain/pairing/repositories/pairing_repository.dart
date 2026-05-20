@@ -1,4 +1,5 @@
 import 'package:dartz/dartz.dart';
+import '../entities/linked_system.dart';
 import '../entities/paired_system.dart';
 import '../entities/pairing_token.dart';
 
@@ -62,4 +63,21 @@ abstract class PairingRepository {
 
   /// Remove the [PairedSystem] with [systemId] from storage.
   Future<Either<PairingFailure, void>> removePairedSystem(String systemId);
+
+  /// Link an external system via the gateway.
+  Future<Either<PairingFailure, LinkedSystem>> linkExternalSystem({
+    required String gatewaySystemId,
+    required String systemId,
+  });
+
+  /// Unlink an external system via the gateway.
+  Future<Either<PairingFailure, void>> unlinkExternalSystem({
+    required String gatewaySystemId,
+    required String systemId,
+  });
+
+  /// Get all external systems linked via the gateway.
+  Future<Either<PairingFailure, List<LinkedSystem>>> getLinkedSystems({
+    required String gatewaySystemId,
+  });
 }

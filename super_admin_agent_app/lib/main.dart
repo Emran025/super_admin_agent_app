@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'di/app_module.dart';
+import 'presentation/dashboard/cubit/linked_systems_cubit.dart';
 import 'presentation/dashboard/pages/dashboard_page.dart';
 import 'presentation/pairing/cubit/pairing_cubit.dart';
+import 'presentation/pairing/pages/link_system_page.dart';
 import 'presentation/pairing/pages/pairing_page.dart';
 import 'shared/data/sqlite_audit_log_service.dart';
 import 'shared/domain/paired_system_registry.dart';
@@ -103,9 +105,16 @@ class SuperAdminAgentApp extends StatelessWidget {
               create: (_) => getIt<PairingCubit>(),
               child: const PairingPage(),
             ),
-        '/dashboard': (_) => BlocProvider(
-              create: (_) => getIt<PairingCubit>(),
+        '/dashboard': (_) => MultiBlocProvider(
+              providers: [
+                BlocProvider(create: (_) => getIt<PairingCubit>()),
+                BlocProvider(create: (_) => getIt<LinkedSystemsCubit>()),
+              ],
               child: const DashboardPage(),
+            ),
+        '/link-system': (_) => BlocProvider(
+              create: (_) => getIt<LinkedSystemsCubit>(),
+              child: const LinkSystemPage(),
             ),
       },
     );
@@ -120,8 +129,11 @@ class SuperAdminAgentApp extends StatelessWidget {
         child: const PairingPage(),
       );
     }
-    return BlocProvider(
-      create: (_) => getIt<PairingCubit>(),
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider(create: (_) => getIt<PairingCubit>()),
+        BlocProvider(create: (_) => getIt<LinkedSystemsCubit>()),
+      ],
       child: const DashboardPage(),
     );
   }

@@ -15,7 +15,10 @@ import '../domain/otp_gateway/use_cases/receive_dispatch_command_use_case.dart';
 import '../domain/otp_gateway/use_cases/report_delivery_status_use_case.dart';
 import '../domain/pairing/repositories/pairing_repository.dart';
 import '../domain/pairing/use_cases/complete_pairing_use_case.dart';
+import '../domain/pairing/use_cases/get_linked_systems_use_case.dart';
+import '../domain/pairing/use_cases/link_system_use_case.dart';
 import '../domain/pairing/use_cases/scan_pairing_token_use_case.dart';
+import '../domain/pairing/use_cases/unlink_system_use_case.dart';
 import '../domain/pairing/use_cases/unpair_system_use_case.dart';
 import '../domain/payment_observation/repositories/payment_observation_repository.dart';
 import '../domain/payment_observation/use_cases/match_observation_to_intent_use_case.dart';
@@ -23,6 +26,7 @@ import '../domain/payment_observation/use_cases/process_incoming_sms_use_case.da
 import '../domain/payment_observation/use_cases/register_observation_session_use_case.dart';
 import '../domain/payment_observation/use_cases/report_observation_use_case.dart';
 import '../presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
+import '../presentation/dashboard/cubit/linked_systems_cubit.dart';
 import '../presentation/otp_gateway/cubit/otp_dispatch_cubit.dart';
 import '../presentation/pairing/cubit/pairing_cubit.dart';
 import '../presentation/payment_observation/cubit/payment_observation_cubit.dart';
@@ -149,6 +153,22 @@ Future<void> setupDependencies() async {
       completeUseCase: getIt<CompletePairingUseCase>(),
       unpairUseCase: getIt<UnpairSystemUseCase>(),
       registry: getIt<PairedSystemRegistry>(),
+    ),
+  );
+  getIt.registerFactory<GetLinkedSystemsUseCase>(
+    () => GetLinkedSystemsUseCase(repository: getIt<PairingRepository>()),
+  );
+  getIt.registerFactory<LinkSystemUseCase>(
+    () => LinkSystemUseCase(repository: getIt<PairingRepository>()),
+  );
+  getIt.registerFactory<UnlinkSystemUseCase>(
+    () => UnlinkSystemUseCase(repository: getIt<PairingRepository>()),
+  );
+  getIt.registerFactory<LinkedSystemsCubit>(
+    () => LinkedSystemsCubit(
+      getUseCase: getIt<GetLinkedSystemsUseCase>(),
+      linkUseCase: getIt<LinkSystemUseCase>(),
+      unlinkUseCase: getIt<UnlinkSystemUseCase>(),
     ),
   );
 

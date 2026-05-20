@@ -2,10 +2,13 @@ import 'dart:convert';
 
 import 'package:dartz/dartz.dart';
 import 'package:dio/dio.dart';
+import 'package:get_it/get_it.dart';
 
+import '../../../domain/pairing/entities/linked_system.dart';
 import '../../../domain/pairing/entities/paired_system.dart';
 import '../../../domain/pairing/entities/pairing_token.dart';
 import '../../../domain/pairing/repositories/pairing_repository.dart';
+import '../../../shared/data/http_client_factory.dart';
 import '../../../shared/domain/secure_storage_service.dart';
 import '../dtos/pairing_dtos.dart';
 
@@ -190,6 +193,90 @@ class PairingRepositoryImpl implements PairingRepository {
       );
     } catch (e) {
       return Left(StorePairedSystemFailure(cause: e));
+    }
+  }
+
+  @override
+  Future<Either<PairingFailure, LinkedSystem>> linkExternalSystem({
+    required String gatewaySystemId,
+    required String systemId,
+  }) async {
+    try {
+      final clientFactory = GetIt.I<HttpClientFactory>();
+      final dio = clientFactory.forSystem(gatewaySystemId);
+
+      final response = await dio.post<Map<String, dynamic>>(
+        '/api/v1/agent/link-system',
+        data: {'system_id': systemId},
+      );
+
+      final body = response.data;
+      if (body == null || body['success'] != true) {
+        return const Left(RegistrationFailure('Failed to link system'));
+      }
+
+      final systemJson = body['system'] as Map<String, dynamic>;
+      return Right(LinkedSystem.fromJson(systemJson));
+    } on DioException catch (e) {
+      return Left(RegistrationFailure(e.message ?? 'Network error'));
+    } catch (e) {
+      return Left(RegistrationFailure(e.toString()));
+    }
+  }
+
+  @override
+  Future<Either<PairingFailure, void>> unlinkExternalSystem({
+    required String gatewaySystemId,
+    required String systemId,
+  }) async {
+    try {
+      final clientFactory = GetIt.I<HttpClientFactory>();
+      final dio = clientFactory.forSystem(gatewaySystemId);
+
+      final response = await dio.post<Map<String, dynamic>>(
+        '/api/v1/agent/unlink-system',
+        data: {'system_id': systemId},
+      );
+
+      final body = response.data;
+      if (body == null || body['success'] != true) {
+        return const Left(RegistrationFailure('Failed to unlink system'));
+      }
+
+      return const Right(null);
+    } on DioException catch (e) {
+      return Left(RegistrationFailure(e.message ?? 'Network error'));
+    } catch (e) {
+      return Left(RegistrationFailure(e.toString()));
+    }
+  }
+
+  @override
+  Future<Either<PairingFailure, List<LinkedSystem>>> getLinkedSystems({
+    required String gatewaySystemId,
+  }) async {
+    try {
+      final clientFactory = GetIt.I<HttpClientFactory>();
+      final dio = clientFactory.forSystem(gatewaySystemId);
+
+      final response = await dio.get<Map<String, dynamic>>(
+        '/api/v1/agent/linked-systems',
+      );
+
+      final body = response.data;
+      if (body == null || body['systems'] == null) {
+        return const Left(RegistrationFailure('Failed to fetch linked systems'));
+      }
+
+      final list = body['systems'] as List;
+      final systems = list
+          .map((e) => LinkedSystem.fromJson(e as Map<String, dynamic>))
+          .toList();
+      return Right(systems);
+    } on DioException catch (e) {
+      return Left(RegistrationFailure(e.message ?? 'Network error'));
+    } catch (e) {
+      return Left(RegistrationFailure(e.toString()));
     }
   }
 }
