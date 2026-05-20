@@ -37,6 +37,7 @@ class ExternalSystem extends Model
         'test_token_encrypted',
         'capabilities',
         'is_test',
+        'agent_id',
         'last_used_at',
     ];
 
@@ -84,6 +85,11 @@ class ExternalSystem extends Model
     // -------------------------------------------------------------------------
     // Relationships
     // -------------------------------------------------------------------------
+
+    public function agent(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Agent::class, 'agent_id', 'agent_id');
+    }
 
     public function otpDispatches(): HasMany
     {

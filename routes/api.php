@@ -60,6 +60,11 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);
     Route::post('/push-challenges/{challengeId}/respond', [PushChallengeController::class, 'respond']);
 
+    // ── Agent External System Link Routes ──
+    Route::post('/agent/link-system', [PairingController::class, 'linkSystem']);
+    Route::post('/agent/unlink-system', [PairingController::class, 'unlinkSystem']);
+    Route::get('/agent/linked-systems', [PairingController::class, 'linkedSystems']);
+
     // ── External system gateway (Constraint 2.1 — AES-256-GCM payload encryption) ──
     Route::prefix('external')
         ->middleware('auth.external')

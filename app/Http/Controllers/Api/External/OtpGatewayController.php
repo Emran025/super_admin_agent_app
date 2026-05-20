@@ -42,8 +42,16 @@ class OtpGatewayController extends Controller
         /** @var ExternalSystem $system */
         $system = $request->attributes->get('external_system');
 
-        // Find the paired agent capable of sending SMS.
-        $agent = Agent::where('capabilities', 'like', '%otp_gateway%')->firstOrFail();
+        // Find the agent linked to this external system
+        $agent = null;
+        if ($system->agent_id) {
+            $agent = Agent::where('agent_id', $system->agent_id)->first();
+        }
+
+        // Fallback to first otp_gateway agent or first agent if not explicitly linked
+        $agent = $agent
+            ?? Agent::where('capabilities', 'like', '%otp_gateway%')->first()
+            ?? Agent::firstOrFail();
 
         $messageBody = $request->input('message_body');
         $phoneNumber = $request->input('phone_number');
