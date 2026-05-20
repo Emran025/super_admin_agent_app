@@ -1,3 +1,5 @@
+{{-- @var bool $isAgentConnected --}}
+{{-- @var bool $hasTestSystem --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>

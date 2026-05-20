@@ -7,6 +7,7 @@ import 'presentation/dashboard/pages/dashboard_page.dart';
 import 'presentation/pairing/cubit/pairing_cubit.dart';
 import 'presentation/pairing/pages/link_system_page.dart';
 import 'presentation/pairing/pages/pairing_page.dart';
+import 'presentation/shared/theme/app_theme.dart';
 import 'shared/data/sqlite_audit_log_service.dart';
 import 'shared/domain/paired_system_registry.dart';
 import 'shared/infrastructure/agent_websocket_service.dart';
@@ -86,6 +87,7 @@ class SuperAdminAgentApp extends StatelessWidget {
     return MaterialApp(
       title: 'Super Admin Agent',
       debugShowCheckedModeBanner: false,
+      theme: AppTheme.dark(),
 
       // Global navigator key — required for 2FA dialog from WS handler.
       navigatorKey: navigatorKey,

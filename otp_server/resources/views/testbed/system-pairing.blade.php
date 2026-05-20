@@ -1,3 +1,7 @@
+{{-- @var \Illuminate\Support\Collection|\App\Models\ExternalSystem[] $systems --}}
+{{-- @var \App\Models\ExternalSystem|null $newSystem --}}
+{{-- @var string|null $newToken --}}
+{{-- @var string|null $newKey --}}
 <!DOCTYPE html>
 <html lang="en">
 

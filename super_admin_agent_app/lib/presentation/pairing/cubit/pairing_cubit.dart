@@ -37,6 +37,9 @@ class PairingCubit extends Cubit<PairingState> {
   /// Activates the QR scanner UI.
   void startScanning() => emit(const PairingScanning());
 
+  /// Cancels the scanning state and returns to idle.
+  void cancelScanning() => emit(const PairingIdle());
+
   /// Called when the camera captures a QR frame.
   ///
   /// Validates and parses the raw value — emits [PairingTokenScanned] on
