@@ -41,8 +41,15 @@ class LoginApprovalController extends Controller
         /** @var ExternalSystem $system */
         $system = $request->attributes->get('external_system');
 
-        // Find the paired agent capable of push 2FA approval.
-        $agent = Agent::where('capabilities', 'like', '%two_fa%')->first()
+        // Find the agent linked to this external system
+        $agent = null;
+        if ($system->agent_id) {
+            $agent = Agent::where('agent_id', $system->agent_id)->first();
+        }
+
+        // Fallback to first two_fa agent or first agent if not explicitly linked
+        $agent = $agent
+            ?? Agent::where('capabilities', 'like', '%two_fa%')->first()
             ?? Agent::firstOrFail();
 
         $username     = $request->input('username');

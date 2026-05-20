@@ -97,4 +97,9 @@ class Agent extends Model
     {
         return in_array($capability, $this->capabilities ?? [], true);
     }
+
+    public function externalSystems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ExternalSystem::class, 'agent_id', 'agent_id');
+    }
 }
