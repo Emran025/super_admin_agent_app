@@ -1,0 +1,150 @@
+# Phase 12 — Centralized Gateway & External System Linking
+
+> **Copy-paste this entire block into your engineering AI.**
+> **Prerequisite: Phase 11 (External Systems API Gateway & Payload Encryption) must be 100% complete.**
+
+---
+
+## 1. Why This Phase Exists
+
+Previously, the architecture assumed a direct mapping between each external system and a dedicated mobile agent endpoint. To achieve a fully professional, unified, and scalable architecture, this phase refactors the topology into a **Centralized Gateway Model**. 
+
+Under this model:
+1. **Unified Endpoint Routing**: The mobile agent registers and pairs with a single Central Gateway Server.
+2. **Centralized External System Linking**: Multiple external systems are linked to their corresponding paired Agent owner on the gateway.
+3. **Decoupled Messaging & Event Forwarding**: External systems call the gateway server securely. The gateway acts as a message broker, identifying the linked Agent owner and forwarding WebSocket commands (using Reverb) directly to the specific Agent.
+4. **Professional Management UI**: The mobile agent app provides a dashboard to view the primary gateway server details, dynamically list linked external systems, scan/link new external systems, and unlink them.
+
+---
+
+## 2. Constraints — Read Before Writing Anything
+
+### Constraint 2.1: Gateway Ownership Representation (Axiom 3)
+External systems must be explicitly linked to an Agent on the database level via a nullable `agent_id` column. If an external system is not linked to any agent, calls to its capabilities must return `HTTP 404 / 401` as there is no online device to receive and execute the commands.
+
+### Constraint 2.2: Cryptographically Secured Agent Endpoints
+Agent-initiated API requests (such as linking, unlinking, and retrieving systems) must be authenticated and verified at the middleware level using:
+- `X-Agent-Public-Key-Id`
+- `X-Agent-Nonce` (Replay attack protection verified via `UsedNonce` db table)
+- `X-Agent-Timestamp`
+- `X-Agent-Signature` (ECDSA-SHA256 signature using the agent's P-256 private key over the canonical JSON payload)
+
+### Constraint 2.3: Zero-Bypass Dynamic Routing
+All inbound external endpoints (`POST /api/v1/external/otp` and `POST /api/v1/external/login`) must dynamically route commands to the WebSocket private channel corresponding to the specific Agent linked to that system, rather than relying on hardcoded system endpoints.
+
+### Constraint 2.4: Clean Flutter State Machine
+The Flutter application must utilize the BLoC pattern (e.g. `LinkedSystemsCubit`) to handle loading, linking, and unlinking states. The UI must avoid direct DB/secure storage edits, relying instead on clean API calls through the authenticated HTTP client factory and use cases.
+
+---
+
+## 3. What to Build
+
+### Step 1: Database Schema
+
+**`add_agent_id_to_external_systems_table.php`**
+Add foreign key to `external_systems`:
+- `agent_id`: Nullable foreign key referencing `agents.agent_id` (on delete cascade or set null).
+
+---
+
+### Step 2: Backend Models & API Routes
+
+**`ExternalSystem.php` and `Agent.php`**
+- Establish the `belongsTo` and `hasMany` relationships between `ExternalSystem` and `Agent`.
+
+**`routes/api.php`**
+Add endpoints inside the agent authenticated route group:
+- `POST /api/v1/agent/link-system`: Links an external system to the authenticated agent.
+- `POST /api/v1/agent/unlink-system`: Unlinks an external system.
+- `GET /api/v1/agent/linked-systems`: Lists all external systems linked to the agent.
+
+---
+
+### Step 3: Controller Implementations
+
+**`PairingController.php`**
+- Implement `linkSystem(Request $request)`: Validates body contains a valid UUID `system_id`. Asserts the system exists and links it to the authenticated agent's ID.
+- Implement `unlinkSystem(Request $request)`: Clears the `agent_id` relationship if it matches the authenticated agent.
+- Implement `linkedSystems()`: Returns a list of linked systems containing their UUID, name, capabilities, and environment type.
+
+**`LoginApprovalController.php` & `OtpGatewayController.php`**
+- Refactor the dynamic routing logic:
+  1. Retrieve the linked `Agent` through the `ExternalSystem` relation.
+  2. If no agent is linked, reject the request with `HTTP 404 / 401`.
+  3. Dispatch the command via WebSocket directly to the agent-specific private channel.
+
+---
+
+### Step 4: Flutter Entities, Use Cases & Cubits
+
+**`LinkedSystem.dart`**
+- Domain entity matching the schema returned by the gateway list endpoint:
+  ```dart
+  class LinkedSystem {
+    final String id;
+    final String name;
+    final List<String> capabilities;
+    final bool isTest;
+  }
+  ```
+
+**Use Cases**:
+- `LinkSystemUseCase`: Executes the linking request.
+- `UnlinkSystemUseCase`: Executes the unlinking request.
+- `GetLinkedSystemsUseCase`: Fetches the current list of linked systems.
+
+**`LinkedSystemsCubit.dart`**
+Manages UI states: `Initial`, `Loading`, `Loaded` (list of systems), `Error`.
+Exposes:
+- `loadSystems(String gatewaySystemId)`
+- `linkSystem({required String gatewaySystemId, required String systemId})`
+- `unlinkSystem({required String gatewaySystemId, required String systemId})`
+
+---
+
+### Step 5: Flutter UI Refactoring
+
+**`LinkSystemPage.dart`**
+- Embeds `MobileScanner` to capture the JSON QR code containing `system_id`, `capabilities`, and environment type (`is_test`).
+- Displays a clean confirmation card highlighting the system details and environment.
+- Invokes the `LinkedSystemsCubit` to confirm and link the system.
+
+**`DashboardPage.dart`**
+- Refactored as a stateful view.
+- Section 1: Renders the primary Gateway Server details and unpair options.
+- Section 2: Renders a dynamic list of Linked External Systems, with visual indications for sandbox mode, a refresh control, and a prompt unlink button.
+
+---
+
+## 4. Key Design Decisions to Understand
+
+**Why do we use ECDSA signature verification for linking?**
+The gateway server must verify that the request to link an external system to an agent actually originates from the agent possessing the paired private key. Without cryptographic signing of these operations, any malicious actor could spoof agent commands on the gateway.
+
+**Why is unlinking database-driven instead of deleting the external system record?**
+Unlinking simply severs the ownership link (`agent_id = null`) rather than deleting the external system. This allows the external system to remain in the gateway registry and potentially be paired/linked to a different agent in the future without losing its historical settings or audit logs.
+
+---
+
+## 5. Verification — What These Tests Must Prove
+
+### Backend Feature Tests (`AgentSystemLinkTest.php`)
+Must verify:
+1. **Valid Link Requests**: A valid body containing a valid `system_id` signed correctly by the agent is processed, yielding `HTTP 200` and updating the database table.
+2. **Signature Tampering Rejection**: An invalid signature or mismatched canonical body returns `HTTP 403`.
+3. **Replay Nonce Prevention**: Replaying a previously verified nonce results in `HTTP 409 Conflict`.
+4. **Valid Unlink Requests**: Releasing the ownership updates the system record's `agent_id` to `null` successfully.
+
+### Frontend Unit Tests
+Must verify:
+1. **Use Case Delegation**: `LinkSystemUseCase`, `UnlinkSystemUseCase`, and `GetLinkedSystemsUseCase` invoke the corresponding repository methods with correct inputs and yield correct outputs.
+2. **Cubit State Transitions**: `LinkedSystemsCubit` transitions states correctly from `Initial -> Loading -> Loaded` or `Error`.
+
+---
+
+## 6. What You Must NOT Do
+
+- ❌ Do not hardcode the gateway endpoints in the Flutter code.
+- ❌ Do not bypass signature verification and nonce verification on agent endpoints.
+- ❌ Do not display sensitive API keys or tokens in the UI dashboard list.
+- ❌ Do not use BuildContext across asynchronous boundaries without checking for widget mounting status.
