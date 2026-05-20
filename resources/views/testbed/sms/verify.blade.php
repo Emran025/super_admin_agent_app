@@ -1,3 +1,5 @@
+{{-- @var string|null $contactName --}}
+{{-- @var string $phoneNumber --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>

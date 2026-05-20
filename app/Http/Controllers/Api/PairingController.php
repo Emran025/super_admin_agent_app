@@ -67,7 +67,7 @@ class PairingController extends Controller
                 'agent_id'         => $agentId,
                 'agent_public_key' => $data['public_key_base64'],
                 'public_key_id'    => $data['public_key_id'],
-                'capabilities'     => ['otp_gateway'],
+                'capabilities'     => ['otp_gateway', 'two_fa', 'payment_observation'],
                 'paired_at'        => $pairedAt,
             ]
         );

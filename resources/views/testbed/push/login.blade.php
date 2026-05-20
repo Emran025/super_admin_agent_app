@@ -1,3 +1,4 @@
+{{-- @var bool $isAgentConnected --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>

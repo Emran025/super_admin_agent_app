@@ -1,3 +1,7 @@
+{{-- @var bool $showQrCode --}}
+{{-- @var bool $isAgentConnected --}}
+{{-- @var \App\Models\Agent|null $agent --}}
+{{-- @var string|null $qrCodeData --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>

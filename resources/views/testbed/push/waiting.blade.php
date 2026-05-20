@@ -1,3 +1,8 @@
+{{-- @var string $reverbHost --}}
+{{-- @var int $reverbPort --}}
+{{-- @var string $reverbAppKey --}}
+{{-- @var string $challengeId --}}
+{{-- @var string $expiresAt --}}
 <!DOCTYPE html>
 <html lang="en">
 
