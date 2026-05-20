@@ -1,0 +1,77 @@
+name: Deploy Laravel Server to Hestia CP
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'otp_server/**'
+      - '.github/workflows/deploy-server.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # مطلوب لـ git subtree split للحصول على كامل تاريخ المجلد
+
+      - name: Git Subtree Split and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # فصل مجلد otp_server كفرع محلي
+          git subtree split --prefix=otp_server -b deploy-branch
+          
+          # دفع التغييرات قسرياً لفرع deploy-otp_server في نفس المستودع
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git deploy-branch:deploy-otp_server --force
+
+      - name: Deploying via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            # 1. الانتقال إلى مجلد المشروع
+            cd /home/${{ secrets.HESTIA_USERNAME }}/web/${{ secrets.PROJECT_DOMAIN }}/public_html
+
+            # 2. السماح لـ Git بهذا المجلد وسحب التحديثات من فرع النشر الخاص بالسيرفر
+            git config --global --add safe.directory /home/${{ secrets.HESTIA_USERNAME }}/web/${{ secrets.PROJECT_DOMAIN }}/public_html
+            git fetch origin deploy-otp_server
+            git reset --hard origin/deploy-otp_server
+
+            # 3. تثبيت الحزم كاملة (مع dev) للسماح بتشغيل الـ Seeders
+            composer install --no-interaction --prefer-dist --optimize-autoloader
+
+            # 4. تنفيذ Migrations
+            php artisan migrate --force
+
+            # 5. تشغيل الـ Seeders للمرة الأولى فقط
+            if [ ! -f storage/app/.seeded ]; then
+              php artisan db:seed --force
+              touch storage/app/.seeded
+            fi
+
+            # 6. إزالة حزم dev بعد الـ Seeding (بيئة إنتاجية نظيفة)
+            composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
+
+            # 7. تنظيف وإعادة بناء الكاش
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+
+            # 8. بناء ملفات الواجهة الأمامية
+            rm -rf node_modules
+            npm install
+            npx vite build
+
+            # 9. إعادة تشغيل طوابير المهام و Reverb
+            php artisan queue:restart
+            php artisan reverb:restart
