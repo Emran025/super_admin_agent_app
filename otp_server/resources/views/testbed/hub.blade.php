@@ -260,18 +260,54 @@
         </p>
     </div>
 
-    @if ($isAgentConnected)
-        <div class="status-banner connected">
-            <span class="status-dot connected"></span>
-            <span>Mobile Agent connected: <strong>{{ $agentId }}</strong> (WebSocket channel occupied & active)</span>
+    @if ($showQrCode)
+        <div class="card card-full" style="border-color: #7c3aed; background: #121026; margin-bottom: 2rem;">
+            <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem; padding: 1rem 0;">
+                <div class="card-icon purple" aria-hidden="true" style="margin: 0 auto;">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M10.5 13.5a3.5 3.5 0 005 0l1-1a3.5 3.5 0 00-5-5l-1 1" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M13.5 10.5a3.5 3.5 0 00-5 0l-1 1a3.5 3.5 0 005 5l1-1" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <h2>Pair Mobile Agent</h2>
+                <p style="max-width: 580px; color: #cbd5e1;">
+                    Scan this QR code with the **Super Admin Agent** app to link it to this server.
+                    Once paired, the agent will dynamically receive SMS OTP requests, 2FA push requests, and telemetry commands.
+                </p>
+                <div style="background: #ffffff; padding: 1.25rem; border-radius: 12px; margin: 1rem 0; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+                    <div id="agent-pairing-qrcode"></div>
+                </div>
+                <p style="font-size: 0.75rem; color: #64748b;">
+                    Token matches <code>OTP_PAIRING_TOKEN</code> in your environment config. Expires in 24 hours.
+                </p>
+            </div>
         </div>
     @else
-        <div class="status-banner disconnected">
-            <span class="status-dot disconnected"></span>
-            <span>
-                Mobile Agent offline or disconnected. Dispatch functions will remain pending.
-                Please pair/start the mobile app and connect to Reverb.
-            </span>
+        <div class="card card-full" style="border-color: #166534; background: #0b1a11; margin-bottom: 2rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 0.5rem; color: #4ade80;">
+                        <span class="status-dot {{ $isAgentConnected ? 'connected' : 'disconnected' }}"></span>
+                        Mobile Agent: {{ $isAgentConnected ? 'Online' : 'Offline' }}
+                    </h2>
+                    <p style="color: #94a3b8; margin-top: 0.5rem;">
+                        A device is currently paired and authenticated.
+                    </p>
+                    <div style="margin-top: 1rem; font-size: 0.8125rem; color: #cbd5e1; display: grid; gap: 0.25rem; text-align: left;">
+                        <div><strong>Agent ID:</strong> <code class="mono" style="color: #e2e8f0;">{{ $agent->agent_id }}</code></div>
+                        <div><strong>Public Key ID:</strong> <code class="mono" style="color: #e2e8f0;">{{ $agent->public_key_id }}</code></div>
+                        <div><strong>Last Seen:</strong> <span style="color: #e2e8f0;">{{ $agent->last_seen_at ? $agent->last_seen_at->diffForHumans() : 'Never' }}</span></div>
+                    </div>
+                </div>
+                <div>
+                    <form method="POST" action="{{ route('testbed.agent.unpair') }}" onsubmit="return confirm('Are you sure you want to unpair this mobile agent? All credentials will be reset.')">
+                        @csrf
+                        <button type="submit" class="btn btn-red" style="padding: 0.75rem 1.5rem; font-size: 0.875rem; border: none; cursor: pointer; border-radius: 8px;">
+                            Force Unpair Agent
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     @endif
 
@@ -408,9 +444,18 @@
         </div>
     </div>
 
-    <p class="footer-note">
-        Zero-trust &bull; AES-256-GCM payload encryption &bull; ECDSA P-256 signed &bull; Self-hosted Reverb WebSocket &bull; No FCM
-    </p>
+    @if ($showQrCode)
+        <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+        <script>
+            new QRCode(document.getElementById('agent-pairing-qrcode'), {
+                text: '{!! $qrCodeData !!}',
+                width: 200,
+                height: 200,
+                colorDark: '#0f172a',
+                colorLight: '#ffffff',
+            });
+        </script>
+    @endif
 
 </body>
 </html>

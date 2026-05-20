@@ -25,6 +25,8 @@ class DashboardPage extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(state.message)),
           );
+        } else if (state is PairingIdle) {
+          Navigator.of(context).pushReplacementNamed('/pair');
         }
       },
       child: Scaffold(
@@ -39,11 +41,13 @@ class DashboardPage extends StatelessWidget {
           ],
         ),
         body: _buildBody(context),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => Navigator.of(context).pushNamed('/pair'),
-          icon: const Icon(Icons.add),
-          label: const Text('Pair System'),
-        ),
+        floatingActionButton: getIt<PairedSystemRegistry>().all.isEmpty
+            ? FloatingActionButton.extended(
+                onPressed: () => Navigator.of(context).pushNamed('/pair'),
+                icon: const Icon(Icons.add),
+                label: const Text('Pair System'),
+              )
+            : null,
       ),
     );
   }

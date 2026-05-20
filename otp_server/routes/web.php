@@ -17,8 +17,31 @@ Route::get('/testbed', function () {
     $agent = \App\Models\Agent::first();
     $isAgentConnected = $agent ? $agent->isOnline() : false;
     $agentId = $agent ? $agent->agent_id : null;
-    return view('testbed.hub', compact('isAgentConnected', 'agentId'));
+    
+    // Show QR code if no agent exists, or if agent is offline AND has not been seen for 24h
+    $lastSeenWithin24h = $agent && $agent->last_seen_at && $agent->last_seen_at->greaterThanOrEqualTo(now()->subHours(24));
+    $showQrCode = !$agent || (!$isAgentConnected && !$lastSeenWithin24h);
+    
+    $qrCodeData = null;
+    if ($showQrCode) {
+        $qrCodeData = json_encode([
+            'version' => '1.0',
+            'system_id' => 'super-admin-system',
+            'system_label' => config('otp_server.system_label', 'SuperAdmin Server'),
+            'pairing_endpoint' => url('/api'),
+            'token' => config('otp_server.pairing_token'),
+            'expires_at' => now()->addHours(24)->toIso8601String(),
+            'capabilities' => ['otp_gateway', 'two_fa', 'payment_observation'],
+        ]);
+    }
+    
+    return view('testbed.hub', compact('isAgentConnected', 'agentId', 'agent', 'showQrCode', 'qrCodeData'));
 })->name('testbed.hub');
+
+Route::post('/testbed/agent/unpair', function () {
+    \App\Models\Agent::truncate();
+    return redirect()->route('testbed.hub')->with('success', 'Mobile agent unpaired successfully. Secure credentials cleared.');
+})->name('testbed.agent.unpair');
 
 /*
 |--------------------------------------------------------------------------
