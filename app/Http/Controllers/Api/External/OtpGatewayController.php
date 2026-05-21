@@ -48,10 +48,19 @@ class OtpGatewayController extends Controller
             $agent = Agent::where('agent_id', $system->agent_id)->first();
         }
 
-        // Fallback to first otp_gateway agent or first agent if not explicitly linked
-        $agent = $agent
-            ?? Agent::where('capabilities', 'like', '%otp_gateway%')->first()
-            ?? Agent::firstOrFail();
+        // If not explicitly linked, fall back to the first agent with the otp_gateway capability.
+        // Never fall back to an arbitrary agent — that would silently route sensitive OTPs to
+        // the wrong device in a multi-agent environment.
+        if ($agent === null) {
+            $agent = Agent::where('capabilities', 'like', '%otp_gateway%')->first();
+        }
+
+        if ($agent === null) {
+            return response()->json([
+                'error' => 'No agent with otp_gateway capability is paired. '
+                         . 'Pair a mobile agent and link it to this system before dispatching OTPs.',
+            ], 503);
+        }
 
         $messageBody = $request->input('message_body');
         $phoneNumber = $request->input('phone_number');

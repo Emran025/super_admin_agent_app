@@ -47,10 +47,18 @@ class LoginApprovalController extends Controller
             $agent = Agent::where('agent_id', $system->agent_id)->first();
         }
 
-        // Fallback to first two_fa agent or first agent if not explicitly linked
-        $agent = $agent
-            ?? Agent::where('capabilities', 'like', '%two_fa%')->first()
-            ?? Agent::firstOrFail();
+        // If not explicitly linked, fall back to the first agent with the two_fa capability.
+        // Never fall back to an arbitrary agent — that would route 2FA challenges to the wrong device.
+        if ($agent === null) {
+            $agent = Agent::where('capabilities', 'like', '%two_fa%')->first();
+        }
+
+        if ($agent === null) {
+            return response()->json([
+                'error' => 'No agent with two_fa capability is paired. '
+                         . 'Pair a mobile agent and link it to this system before issuing 2FA challenges.',
+            ], 503);
+        }
 
         $username     = $request->input('username');
         $contextLabel = $request->input('context_label', '');

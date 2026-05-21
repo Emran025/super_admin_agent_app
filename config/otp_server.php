@@ -50,4 +50,5 @@ return [
     'reverb_host'    => env('REVERB_HOST', 'localhost'),
     'reverb_port'    => (int) env('REVERB_PORT', 8080),
     'reverb_app_key' => env('REVERB_APP_KEY', 'super-admin-reverb-key'),
+    'reverb_scheme'  => env('REVERB_SCHEME', 'http'),
 ];

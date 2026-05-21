@@ -71,16 +71,13 @@ class AgentReportController extends Controller
             return response()->json(['error' => 'Unknown agent.'], 404);
         }
 
-        // Gate 3 — Nonce replay prevention (checked before signature to short-circuit cheap)
-        $nonceExists = UsedNonce::where('agent_id', $agent->agent_id)
-            ->where('nonce', $data['nonce'])
-            ->exists();
-
-        if ($nonceExists) {
-            return response()->json(['error' => 'Nonce already used — replay detected.'], 409);
+        // Gate 5 — Command ownership and existence (check early to avoid crypto work on phantom commands)
+        $dispatch = OtpDispatch::find($commandId);
+        if ($dispatch === null) {
+            return response()->json(['error' => 'Command not found.'], 404);
         }
 
-        // Gate 4 — Signature verification
+        // Gate 4 — Signature verification (before nonce insert to avoid consuming nonce on bad sig)
         $signingInput = $this->verifier->buildOtpReportSigningInput(
             commandId:  $data['command_id'],
             nonce:      $data['nonce'],
@@ -94,14 +91,21 @@ class AgentReportController extends Controller
 
         $agent->update(['last_seen_at' => now()]);
 
-        // Gate 5 — Command ownership and existence
-        $dispatch = OtpDispatch::find($commandId);
-        if ($dispatch === null) {
-            return response()->json(['error' => 'Command not found.'], 404);
-        }
+        // Gates 3 + 6 — Atomic nonce check-and-consume + status update inside a single transaction.
+        // Using a DB transaction with lockForUpdate prevents two concurrent requests with the same
+        // nonce from both passing the check before either inserts the record (TOCTOU race).
+        $replayDetected = false;
+        DB::transaction(function () use ($agent, $data, $dispatch, &$replayDetected) {
+            $nonceExists = UsedNonce::where('agent_id', $agent->agent_id)
+                ->where('nonce', $data['nonce'])
+                ->lockForUpdate()
+                ->exists();
 
-        // Gate 6 — Consume nonce and update status atomically
-        DB::transaction(function () use ($agent, $data, $dispatch) {
+            if ($nonceExists) {
+                $replayDetected = true;
+                return;
+            }
+
             UsedNonce::create([
                 'agent_id' => $agent->agent_id,
                 'nonce'    => $data['nonce'],
@@ -110,6 +114,10 @@ class AgentReportController extends Controller
 
             $dispatch->update(['status' => $data['status']]);
         });
+
+        if ($replayDetected) {
+            return response()->json(['error' => 'Nonce already used — replay detected.'], 409);
+        }
 
         return response()->json(['status' => $data['status']], 200);
     }
