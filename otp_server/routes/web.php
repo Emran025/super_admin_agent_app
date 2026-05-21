@@ -24,14 +24,24 @@ Route::get('/testbed', function () {
     
     $qrCodeData = null;
     if ($showQrCode) {
+        // Resolve public Reverb connection parameters for the mobile agent.
+        // REVERB_HOST / REVERB_PORT are internal bind addresses; the agent
+        // needs the public-facing host and port it can reach from outside.
+        $reverbHost = request()->getHost();
+        $reverbPort = request()->secure() ? 443 : (int) request()->getPort();
+        $reverbAppKey = config('otp_server.reverb_app_key', 'super-admin-reverb-key');
+
         $qrCodeData = json_encode([
-            'version' => '1.0',
-            'system_id' => 'super-admin-system',
-            'system_label' => config('otp_server.system_label', 'SuperAdmin Server'),
+            'version'          => '1.0',
+            'system_id'        => 'super-admin-system',
+            'system_label'     => config('otp_server.system_label', 'SuperAdmin Server'),
             'pairing_endpoint' => url('/api'),
-            'token' => config('otp_server.pairing_token'),
-            'expires_at' => now()->addHours(24)->toIso8601String(),
-            'capabilities' => ['otp_gateway', 'two_fa', 'payment_observation'],
+            'token'            => config('otp_server.pairing_token'),
+            'expires_at'       => now()->addHours(24)->toIso8601String(),
+            'capabilities'     => ['otp_gateway', 'two_fa', 'payment_observation'],
+            'reverb_host'      => $reverbHost,
+            'reverb_port'      => $reverbPort,
+            'reverb_app_key'   => $reverbAppKey,
         ]);
     }
     

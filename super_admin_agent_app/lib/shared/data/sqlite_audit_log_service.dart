@@ -24,8 +24,14 @@ class SqliteAuditLogService implements AuditLogService {
     return _instance!;
   }
 
-  /// Must be called once at app startup before any [log] calls.
+  /// Must be called once at startup (inside the background service isolate)
+  /// before any [log] calls.
+  ///
+  /// Idempotent: subsequent calls are no-ops if the database is already open.
+  /// This guards against double-init if the isolate entry-point is ever called
+  /// more than once within the same process lifetime.
   static Future<void> init() async {
+    if (_db != null) return;
     final dbPath = join(await getDatabasesPath(), 'audit_log.db');
     _db = await openDatabase(
       dbPath,

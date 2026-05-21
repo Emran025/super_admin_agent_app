@@ -453,10 +453,15 @@
         <script>
             new QRCode(document.getElementById('agent-pairing-qrcode'), {
                 text: '{!! $qrCodeData !!}',
-                width: 200,
-                height: 200,
-                colorDark: '#0f172a',
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
                 colorLight: '#ffffff',
+                // Level L = 7 % error correction (vs default H = 30 %).
+                // The code is displayed on a clean screen so damage recovery
+                // is irrelevant. L produces the fewest modules, making each
+                // cell larger and far easier for a phone camera to resolve.
+                correctLevel: QRCode.CorrectLevel.L,
             });
         </script>
     @endif

@@ -11,7 +11,6 @@ import 'presentation/pairing/cubit/pairing_cubit.dart';
 import 'presentation/pairing/pages/link_system_page.dart';
 import 'presentation/pairing/pages/pairing_page.dart';
 import 'presentation/shared/theme/app_theme.dart';
-import 'shared/data/sqlite_audit_log_service.dart';
 import 'shared/domain/paired_system_registry.dart';
 import 'shared/infrastructure/agent_websocket_service.dart';
 import 'shared/infrastructure/permission_handler_service.dart';
@@ -40,18 +39,21 @@ Future<void> main() async {
   // 3. Initialise the Android Foreground Service.
   //    This keeps the process alive through Doze mode, ensuring the WebSocket
   //    connection is never killed by the OS in the background.
+  //    NOTE: SqliteAuditLogService.init() is intentionally NOT called here.
+  //    The audit log database is opened exclusively inside the background
+  //    service isolate (_onStart). Calling it in both the UI isolate and the
+  //    background isolate simultaneously causes sqflite to race on the same
+  //    SQLite file, corrupting the internal transaction state and crashing with
+  //    "Cannot perform this operation because there is no current transaction".
   await AgentForegroundService.init();
 
-  // 4. Initialize the append-only audit log database.
-  await SqliteAuditLogService.init();
-
-  // 5. Wire all services into the DI container.
+  // 4. Wire all services into the DI container.
   await setupDependencies();
 
-  // 6. Load all paired systems into the in-memory registry.
+  // 5. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();
 
-  // 7. Listen for 2FA challenge approval requests from the background service isolate.
+  // 6. Listen for 2FA challenge approval requests from the background service isolate.
   FlutterBackgroundService().on('show_challenge').listen((event) {
     if (event != null) {
       final commandId = event['commandId'] as String?;

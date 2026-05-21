@@ -15,6 +15,12 @@ class PairingTokenDto {
   final String expiresAt;
   final List<String> capabilities;
 
+  // Optional Reverb WebSocket connection parameters embedded in the QR.
+  // Present when the server embeds them at QR generation time.
+  final String? reverbHost;
+  final int? reverbPort;
+  final String? reverbAppKey;
+
   const PairingTokenDto({
     required this.version,
     required this.systemId,
@@ -23,6 +29,9 @@ class PairingTokenDto {
     required this.token,
     required this.expiresAt,
     required this.capabilities,
+    this.reverbHost,
+    this.reverbPort,
+    this.reverbAppKey,
   });
 
   /// Parses the raw JSON string from the QR camera scan.
@@ -40,6 +49,9 @@ class PairingTokenDto {
       token: map['token'] as String,
       expiresAt: map['expires_at'] as String,
       capabilities: List<String>.from(map['capabilities'] as List),
+      reverbHost: map['reverb_host'] as String?,
+      reverbPort: map['reverb_port'] as int?,
+      reverbAppKey: map['reverb_app_key'] as String?,
     );
   }
 
@@ -53,6 +65,9 @@ class PairingTokenDto {
       token: token,
       expiresAt: DateTime.parse(expiresAt).toUtc(),
       capabilities: List<String>.unmodifiable(capabilities),
+      reverbHost: reverbHost,
+      reverbPort: reverbPort,
+      reverbAppKey: reverbAppKey,
     );
   }
 }

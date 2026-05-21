@@ -133,6 +133,31 @@ class PairingRepositoryImpl implements PairingRepository {
         }
       }
 
+      // Prefer Reverb connection parameters embedded directly in the QR code
+      // over values returned by the pairing API response. The QR is generated
+      // by the server using the public-facing hostname and port (derived from
+      // the HTTP request), so it is always correct for external clients.
+      // The API response values may contain internal bind addresses
+      // (e.g. 0.0.0.0, 127.0.0.1) when the server env is not tuned for
+      // external access.
+      final resolvedReverbHost = token.reverbHost ?? dto.reverbHost;
+      final resolvedReverbPort = token.reverbPort ?? dto.reverbPort;
+      final resolvedReverbAppKey = token.reverbAppKey ?? dto.reverbAppKey;
+
+      if (resolvedReverbHost != null || resolvedReverbPort != null || resolvedReverbAppKey != null) {
+        dto = PairedSystemDto(
+          agentId: dto.agentId,
+          systemId: dto.systemId,
+          systemLabel: dto.systemLabel,
+          baseUrl: dto.baseUrl,
+          grantedCapabilities: dto.grantedCapabilities,
+          pairedAt: dto.pairedAt,
+          reverbHost: resolvedReverbHost,
+          reverbPort: resolvedReverbPort,
+          reverbAppKey: resolvedReverbAppKey,
+        );
+      }
+
       // Persist Reverb WebSocket connection parameters to secure storage so
       // that AgentWebSocketService can connect to Reverb after pairing.
       // These are NOT part of the PairedSystem entity itself.

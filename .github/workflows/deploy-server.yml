@@ -72,8 +72,7 @@ jobs:
             php artisan view:cache
 
             # 8. بناء ملفات الواجهة الأمامية
-            rm -rf node_modules
-            npm install
+            npm ci
             npx vite build
 
             # 9. إعادة تشغيل طوابير المهام و Reverb

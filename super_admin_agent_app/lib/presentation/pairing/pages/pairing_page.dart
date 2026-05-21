@@ -345,7 +345,7 @@ class _AgentRoleBlock extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.shield_outlined, size: 14, color: ColorTokens.emerald500),
+            const Icon(Icons.shield_outlined, size: 14, color: ColorTokens.emerald500),
             const SizedBox(width: SpacingTokens.xs),
             Text(
               'AGENT ROLE',
@@ -362,11 +362,11 @@ class _AgentRoleBlock extends StatelessWidget {
             borderRadius: BorderRadius.circular(RadiusTokens.sm.toDouble()),
             border: Border.all(color: ColorTokens.emerald500.withValues(alpha: 0.35)),
           ),
-          child: Row(
+          child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.verified_user, size: 14, color: ColorTokens.emerald500),
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               Text(
                 'Primary Gateway Agent',
                 style: TextStyle(
@@ -438,6 +438,10 @@ class _ScannerView extends StatefulWidget {
 class _ScannerViewState extends State<_ScannerView> with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     autoStart: false,
+    // Restrict to QR codes only — MLKit otherwise tries 15+ formats on every
+    // frame (EAN, Code128, DataMatrix, PDF417, Aztec…), which is the primary
+    // reason scanning feels slow or fails to trigger.
+    formats: const [BarcodeFormat.qrCode],
   );
   bool _scanned = false;
 
