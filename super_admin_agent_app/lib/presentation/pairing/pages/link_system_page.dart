@@ -21,7 +21,11 @@ class LinkSystemPage extends StatefulWidget {
   State<LinkSystemPage> createState() => _LinkSystemPageState();
 }
 
-class _LinkSystemPageState extends State<LinkSystemPage> {
+class _LinkSystemPageState extends State<LinkSystemPage>
+    with WidgetsBindingObserver {
+  final MobileScannerController _controller = MobileScannerController(
+    autoStart: false,
+  );
   Map<String, dynamic>? _scannedData;
   bool _isLoading = false;
   String? _errorMessage;
@@ -29,6 +33,8 @@ class _LinkSystemPageState extends State<LinkSystemPage> {
 
   void _onQrScanned(String rawValue) {
     if (_scanned) return;
+    // Stop the camera immediately on any detection to free hardware resources.
+    _controller.stop();
     try {
       final data = jsonDecode(rawValue) as Map<String, dynamic>;
       if (!data.containsKey('system_id')) {
@@ -71,18 +77,18 @@ class _LinkSystemPageState extends State<LinkSystemPage> {
     final systemId = _scannedData!['system_id'] as String;
 
     final navigator = Navigator.of(context);
-    final success = await context.read<LinkedSystemsCubit>().linkSystem(
+    final errorMsg = await context.read<LinkedSystemsCubit>().linkSystem(
           gatewaySystemId: gatewaySystemId,
           systemId: systemId,
         );
 
     if (mounted) {
-      if (success) {
+      if (errorMsg == null) {
         navigator.pop(true);
       } else {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Failed to link system on the server.';
+          _errorMessage = errorMsg;
         });
       }
     }
@@ -95,6 +101,42 @@ class _LinkSystemPageState extends State<LinkSystemPage> {
       _isLoading = false;
       _scanned = false;
     });
+    // Restart the camera for another scan attempt.
+    _controller.start();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _controller.start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_controller.value.isInitialized) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // Only restart if we are still in scanning state (no result yet)
+        if (_scannedData == null && _errorMessage == null && !_isLoading) {
+          _controller.start();
+        }
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _controller.stop();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
@@ -241,6 +283,7 @@ class _LinkSystemPageState extends State<LinkSystemPage> {
     return Stack(
       children: [
         MobileScanner(
+          controller: _controller,
           onDetect: (capture) {
             final barcodes = capture.barcodes;
             if (barcodes.isEmpty) return;

@@ -36,7 +36,7 @@ class SqliteAuditLogService implements AuditLogService {
 
   static Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE $_tableName (
+      CREATE TABLE IF NOT EXISTS $_tableName (
         entry_id    TEXT PRIMARY KEY,
         action_type TEXT NOT NULL,
         system_id   TEXT NOT NULL,
@@ -51,7 +51,7 @@ class SqliteAuditLogService implements AuditLogService {
     // This trigger fires at the database engine level — no application code
     // can update a row, even accidentally.
     await db.execute('''
-      CREATE TRIGGER prevent_audit_update
+      CREATE TRIGGER IF NOT EXISTS prevent_audit_update
       BEFORE UPDATE ON $_tableName
       BEGIN
         SELECT RAISE(ABORT, 'Audit log is append-only. Updates are forbidden.');

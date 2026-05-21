@@ -90,11 +90,11 @@ void main() {
 
       expectLater(cubit.stream, emitsInOrder(expected));
 
-      final success = await cubit.linkSystem(
+      final result = await cubit.linkSystem(
         gatewaySystemId: 'gate-1',
         systemId: 'sys-ext-1',
       );
-      expect(success, isTrue);
+      expect(result, isNull);
     });
 
     test('unlinkSystem removes unlinked system from loaded state on success', () async {

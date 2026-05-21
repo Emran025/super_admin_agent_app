@@ -1,3 +1,4 @@
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../domain/pairing/use_cases/complete_pairing_use_case.dart';
 import '../../../domain/pairing/use_cases/scan_pairing_token_use_case.dart';
@@ -73,6 +74,7 @@ class PairingCubit extends Cubit<PairingState> {
       (system) {
         _registry.register(system);
         _pendingToken = null;
+        FlutterBackgroundService().invoke('connect_websocket');
         emit(PairingSuccess(system));
       },
     );
@@ -85,6 +87,7 @@ class PairingCubit extends Cubit<PairingState> {
       (failure) => emit(PairingError(_pairingFailureToMessage(failure))),
       (_) {
         _registry.unregister(systemId);
+        FlutterBackgroundService().invoke('disconnect_websocket');
         emit(const PairingIdle());
       },
     );

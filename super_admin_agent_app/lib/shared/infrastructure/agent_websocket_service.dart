@@ -1,13 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:logger/logger.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../../di/app_module.dart';
 import '../data/http_client_factory.dart';
+import '../data/sqlite_audit_log_service.dart';
 import '../domain/paired_system_registry.dart';
 import '../domain/secure_storage_service.dart';
+import 'auth_2fa_ws_handler.dart';
+import 'otp_gateway_ws_handler.dart';
+import 'payment_observation_ws_handler.dart';
 import 'ws_message_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -104,15 +110,38 @@ class AgentWebSocketService {
   // ---------------------------------------------------------------------------
 
   Future<void> _connectToSystem(String systemId) async {
-    final host = (await _secureStorage.read(key: _kReverbHost))
+    String host = (await _secureStorage.read(key: _kReverbHost))
         .fold((_) => 'localhost', (v) => v ?? 'localhost');
     final portStr = (await _secureStorage.read(key: _kReverbPort))
         .fold((_) => '8080', (v) => v ?? '8080');
     final appKey = (await _secureStorage.read(key: _kReverbAppKey))
         .fold((_) => '', (v) => v ?? '');
 
+    String scheme = 'ws';
+    final system = _registry.findBySystemId(systemId);
+    if (system != null) {
+      final parsedBaseUri = Uri.tryParse(system.baseUrl);
+      if (parsedBaseUri != null) {
+        if (parsedBaseUri.scheme == 'https') {
+          scheme = 'wss';
+        }
+        if (host == 'localhost' || host == '127.0.0.1') {
+          final parentHost = parsedBaseUri.host;
+          if (parentHost.isNotEmpty) {
+            _log.i('[WS] Overriding loopback reverb_host "$host" with parent server host "$parentHost"');
+            host = parentHost;
+          }
+        }
+      }
+    }
+
+    if (host == 'localhost' || host == '127.0.0.1') {
+      _log.i('[WS] Host is still loopback — falling back to 10.0.2.2 for Android emulator compatibility.');
+      host = '10.0.2.2';
+    }
+
     final wsUri = Uri.parse(
-      'ws://$host:$portStr/app/$appKey'
+      '$scheme://$host:$portStr/app/$appKey'
       '?protocol=$_pusherProtocol&client=flutter-agent&version=1.0',
     );
 
@@ -291,9 +320,13 @@ class AgentWebSocketService {
 /// Usage:
 ///   Call [AgentForegroundService.init()] from main() before [runApp()].
 ///   The service auto-starts on device boot (requires RECEIVE_BOOT_COMPLETED).
+@pragma('vm:entry-point')
 class AgentForegroundService {
   static const _notificationChannelId = 'super_admin_agent';
   static const _notificationId = 888;
+
+  static ServiceInstance? _instance;
+  static ServiceInstance? get instance => _instance;
 
   /// Initialise and start the foreground service.
   ///
@@ -324,9 +357,32 @@ class AgentForegroundService {
 
   @pragma('vm:entry-point')
   static Future<void> _onStart(ServiceInstance service) async {
-    // The background isolate has its own Dart VM — DI must be re-wired here.
-    // TODO(phase-7): Re-initialise DI and AgentWebSocketService in this isolate.
-    // For now, update the notification to show the service is alive.
+    _instance = service;
+
+    // 1. Initialise dependencies in this background isolate's heap context
+    await SqliteAuditLogService.init();
+    await setupDependencies();
+    await getIt<PairedSystemRegistry>().reload();
+
+    // 2. Register all capability WebSocket handlers inside this isolate
+    final router = getIt<WsMessageRouter>();
+    router.registerHandler(
+      CapabilityId.twoFa,
+      Auth2faWsHandler(navigatorKey: GlobalKey<NavigatorState>()),
+    );
+    router.registerHandler(
+      CapabilityId.otpGateway,
+      OtpGatewayWsHandler(),
+    );
+    router.registerHandler(
+      CapabilityId.paymentObservation,
+      PaymentObservationWsHandler(),
+    );
+
+    // 3. Connect the AgentWebSocketService to the Reverb server
+    final websocketService = getIt<AgentWebSocketService>();
+    await websocketService.connect();
+
     if (service is AndroidServiceInstance) {
       service.setAsForegroundService();
       service.setForegroundNotificationInfo(
@@ -335,7 +391,21 @@ class AgentForegroundService {
       );
     }
 
-    service.on('stop').listen((_) => service.stopSelf());
+    // 4. Register event channels to listen for state changes from the main isolate
+    service.on('connect_websocket').listen((_) async {
+      await getIt<PairedSystemRegistry>().reload();
+      await websocketService.connect();
+    });
+
+    service.on('disconnect_websocket').listen((_) async {
+      websocketService.disconnect();
+      await getIt<PairedSystemRegistry>().reload();
+    });
+
+    service.on('stop').listen((_) {
+      websocketService.disconnect();
+      service.stopSelf();
+    });
   }
 
   @pragma('vm:entry-point')

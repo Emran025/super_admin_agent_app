@@ -86,7 +86,52 @@ class PairingRepositoryImpl implements PairingRepository {
         return const Left(RegistrationFailure('Empty server response'));
       }
 
-      final dto = PairedSystemDto.fromJson(body);
+      var dto = PairedSystemDto.fromJson(body);
+
+      // Rewrite loopback addresses dynamically using the pairingEndpoint host/port that successfully responded
+      final parsedBaseUrl = Uri.tryParse(dto.baseUrl);
+      final parsedEndpoint = Uri.tryParse(token.pairingEndpoint);
+      if (parsedBaseUrl != null && parsedEndpoint != null) {
+        final baseHost = parsedBaseUrl.host;
+        if (baseHost == 'localhost' || baseHost == '127.0.0.1') {
+          final scheme = parsedEndpoint.scheme;
+          final host = parsedEndpoint.host;
+          final port = parsedEndpoint.hasPort ? ':${parsedEndpoint.port}' : '';
+          
+          final newBaseUrl = '$scheme://$host$port';
+          
+          String? newReverbHost = dto.reverbHost;
+          if (newReverbHost == 'localhost' || newReverbHost == '127.0.0.1') {
+            newReverbHost = host;
+          }
+
+          dto = PairedSystemDto(
+            agentId: dto.agentId,
+            systemId: dto.systemId,
+            systemLabel: dto.systemLabel,
+            baseUrl: newBaseUrl,
+            grantedCapabilities: dto.grantedCapabilities,
+            pairedAt: dto.pairedAt,
+            reverbHost: newReverbHost,
+            reverbPort: dto.reverbPort,
+            reverbAppKey: dto.reverbAppKey,
+          );
+        } else {
+          if (dto.reverbHost == 'localhost' || dto.reverbHost == '127.0.0.1') {
+            dto = PairedSystemDto(
+              agentId: dto.agentId,
+              systemId: dto.systemId,
+              systemLabel: dto.systemLabel,
+              baseUrl: dto.baseUrl,
+              grantedCapabilities: dto.grantedCapabilities,
+              pairedAt: dto.pairedAt,
+              reverbHost: parsedBaseUrl.host,
+              reverbPort: dto.reverbPort,
+              reverbAppKey: dto.reverbAppKey,
+            );
+          }
+        }
+      }
 
       // Persist Reverb WebSocket connection parameters to secure storage so
       // that AgentWebSocketService can connect to Reverb after pairing.

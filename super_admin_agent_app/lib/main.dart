@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'di/app_module.dart';
+import 'presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
+import 'presentation/auth_2fa/widgets/challenge_approval_dialog.dart';
 import 'presentation/dashboard/cubit/linked_systems_cubit.dart';
 import 'presentation/dashboard/pages/dashboard_page.dart';
 import 'presentation/pairing/cubit/pairing_cubit.dart';
@@ -11,11 +14,7 @@ import 'presentation/shared/theme/app_theme.dart';
 import 'shared/data/sqlite_audit_log_service.dart';
 import 'shared/domain/paired_system_registry.dart';
 import 'shared/infrastructure/agent_websocket_service.dart';
-import 'shared/infrastructure/auth_2fa_ws_handler.dart';
-import 'shared/infrastructure/otp_gateway_ws_handler.dart';
-import 'shared/infrastructure/payment_observation_ws_handler.dart';
 import 'shared/infrastructure/permission_handler_service.dart';
-import 'shared/infrastructure/ws_message_router.dart';
 
 // ---------------------------------------------------------------------------
 // Global navigator key
@@ -52,27 +51,38 @@ Future<void> main() async {
   // 6. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();
 
-  // 7. Register all capability WebSocket handlers with the router.
-  final router = getIt<WsMessageRouter>();
-  router.registerHandler(
-    CapabilityId.twoFa,
-    Auth2faWsHandler(navigatorKey: navigatorKey),
-  );
-  router.registerHandler(
-    CapabilityId.otpGateway,
-    OtpGatewayWsHandler(),
-  );
-  router.registerHandler(
-    CapabilityId.paymentObservation,
-    PaymentObservationWsHandler(),
-  );
+  // 7. Listen for 2FA challenge approval requests from the background service isolate.
+  FlutterBackgroundService().on('show_challenge').listen((event) {
+    if (event != null) {
+      final commandId = event['commandId'] as String?;
+      final systemId = event['systemId'] as String?;
+      if (commandId != null && systemId != null) {
+        _show2FaDialog(commandId, systemId);
+      }
+    }
+  });
 
-  // 8. Open the persistent WebSocket connection to the Reverb server.
-  //    This replaces Firebase Cloud Messaging as the command delivery channel.
-  await getIt<AgentWebSocketService>().connect();
-
-  // 9. Start the app.
+  // 8. Start the app.
   runApp(const SuperAdminAgentApp());
+}
+
+/// Dynamic dialog dispatcher for background-triggered 2FA authentication challenges.
+void _show2FaDialog(String commandId, String systemId) {
+  final navigatorState = navigatorKey.currentState;
+  if (navigatorState == null) return;
+
+  final cubit = getIt<AuthChallengeCubit>();
+  cubit.loadChallenge(challengeId: commandId, systemId: systemId);
+
+  navigatorState.push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => BlocProvider.value(
+        value: cubit,
+        child: const ChallengeApprovalDialog(),
+      ),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------

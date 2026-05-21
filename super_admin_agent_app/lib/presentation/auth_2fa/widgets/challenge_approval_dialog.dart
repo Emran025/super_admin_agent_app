@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../domain/auth_2fa/value_objects/agent_decision.dart';
@@ -17,8 +18,19 @@ import 'package:super_admin_agent/presentation/shared/widgets/custom_card.dart';
 /// - No business logic — only calls [AuthChallengeCubit] methods
 /// - On [AuthChallengeSubmitted]: pops the dialog
 /// - On [AuthChallengeError]: pops the dialog, shows a [SnackBar]
-class ChallengeApprovalDialog extends StatelessWidget {
+class ChallengeApprovalDialog extends StatefulWidget {
   const ChallengeApprovalDialog({super.key});
+
+  @override
+  State<ChallengeApprovalDialog> createState() => _ChallengeApprovalDialogState();
+}
+
+class _ChallengeApprovalDialogState extends State<ChallengeApprovalDialog> {
+  @override
+  void dispose() {
+    FlutterBackgroundService().invoke('restore_notification');
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

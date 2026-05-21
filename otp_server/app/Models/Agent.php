@@ -50,9 +50,12 @@ class Agent extends Model
         try {
             $config = config('broadcasting.connections.reverb');
             if ($config && isset($config['key'], $config['secret'], $config['app_id'])) {
-                // Read local Reverb host/port from configuration
-                $host = config('otp_server.reverb_host', '127.0.0.1');
-                $port = (int) config('otp_server.reverb_port', 8080);
+                // Query the local Reverb server process directly
+                $host = env('REVERB_SERVER_HOST', '127.0.0.1');
+                if ($host === '0.0.0.0') {
+                    $host = '127.0.0.1';
+                }
+                $port = (int) env('REVERB_SERVER_PORT', 8080);
 
                 $pusher = new \Pusher\Pusher(
                     $config['key'],

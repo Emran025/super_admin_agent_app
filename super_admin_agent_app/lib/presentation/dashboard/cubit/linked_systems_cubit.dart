@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../domain/pairing/entities/linked_system.dart';
+import '../../../domain/pairing/repositories/pairing_repository.dart';
 import '../../../domain/pairing/use_cases/get_linked_systems_use_case.dart';
 import '../../../domain/pairing/use_cases/link_system_use_case.dart';
 import '../../../domain/pairing/use_cases/unlink_system_use_case.dart';
@@ -58,7 +59,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
     );
   }
 
-  Future<bool> linkSystem({
+  Future<String?> linkSystem({
     required String gatewaySystemId,
     required String systemId,
   }) async {
@@ -68,8 +69,14 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
     );
     return result.fold(
       (failure) {
-        emit(const LinkedSystemsError('Failed to link system'));
-        return false;
+        String msg = 'Failed to link system';
+        if (failure is RegistrationFailure) {
+          msg = failure.reason;
+        } else if (failure is TokenInvalidFailure) {
+          msg = failure.reason;
+        }
+        emit(LinkedSystemsError(msg));
+        return msg;
       },
       (system) {
         if (state is LinkedSystemsLoaded) {
@@ -78,7 +85,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
         } else {
           loadSystems(gatewaySystemId);
         }
-        return true;
+        return null; // success
       },
     );
   }

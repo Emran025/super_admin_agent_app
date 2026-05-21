@@ -436,19 +436,55 @@ class _ScannerView extends StatefulWidget {
   State<_ScannerView> createState() => _ScannerViewState();
 }
 
-class _ScannerViewState extends State<_ScannerView> {
+class _ScannerViewState extends State<_ScannerView> with WidgetsBindingObserver {
+  final MobileScannerController _controller = MobileScannerController(
+    autoStart: false,
+  );
   bool _scanned = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _controller.start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_controller.value.isInitialized) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _controller.start();
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _controller.stop();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
         MobileScanner(
+          controller: _controller,
           onDetect: (capture) {
             if (_scanned) return;
             final raw = capture.barcodes.firstOrNull?.rawValue;
             if (raw == null || raw.isEmpty) return;
             setState(() => _scanned = true);
+            _controller.stop();
             widget.onDetect(raw);
           },
         ),
@@ -495,6 +531,7 @@ class _ScannerViewState extends State<_ScannerView> {
     );
   }
 }
+
 
 class _ViewfinderPainter extends CustomPainter {
   @override
