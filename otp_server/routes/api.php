@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AgentHeartbeatController;
 use App\Http\Controllers\Api\AgentReportController;
 use App\Http\Controllers\Api\BroadcastingAuthController;
 use App\Http\Controllers\Api\External\LoginApprovalController;
@@ -33,6 +34,9 @@ use Illuminate\Support\Facades\Route;
 |   POST  /api/v1/push-challenges/{challengeId}/respond
 |     ↳ PushChallengeController::respond()
 |
+|   POST  /api/v1/agent/heartbeat
+|     ↳ AgentHeartbeatController::heartbeat()
+|
 | ── External Gateway Routes (AES-256-GCM encrypted) ─────────────────────
 |
 |   POST  /api/v1/external/otp
@@ -59,6 +63,9 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/otp-commands/{commandId}', [OtpCommandController::class, 'show']);
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);
     Route::post('/push-challenges/{challengeId}/respond', [PushChallengeController::class, 'respond']);
+
+    // ── Agent heartbeat — keeps last_seen_at fresh while the WS stays alive ──
+    Route::post('/agent/heartbeat', [AgentHeartbeatController::class, 'heartbeat']);
 
     // ── Agent External System Link Routes ──
     Route::post('/agent/link-system', [PairingController::class, 'linkSystem']);

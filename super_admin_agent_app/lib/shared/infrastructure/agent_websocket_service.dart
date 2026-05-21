@@ -60,12 +60,15 @@ class AgentWebSocketService {
   final _log = Logger();
 
   WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
+  Timer? _heartbeatTimer;
   String? _socketId;
   int _reconnectDelaySecs = 2;
 
   static const int _maxReconnectDelaySecs = 60;
   static const String _pusherProtocol = '7';
+  static const Duration _heartbeatInterval = Duration(seconds: 30);
 
   AgentWebSocketService({
     required WsMessageRouter router,
@@ -99,10 +102,46 @@ class AgentWebSocketService {
 
   /// Cleanly closes the WebSocket connection.
   void disconnect() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _reconnectTimer?.cancel();
+    _subscription?.cancel();
+    _subscription = null;
     _channel?.sink.close();
     _channel = null;
     _socketId = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Heartbeat — keep last_seen_at fresh on the server
+  // ---------------------------------------------------------------------------
+
+  /// Starts a periodic HTTP heartbeat so the server's last_seen_at column
+  /// stays within the online window even when the WebSocket stays alive
+  /// without a channel re-auth (which is the only other event that updates it).
+  void _startHeartbeat(String systemId) {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      _sendHeartbeat(systemId);
+    });
+    // Send one immediately so the hub shows online right away.
+    _sendHeartbeat(systemId);
+  }
+
+  Future<void> _sendHeartbeat(String systemId) async {
+    final system = _registry.findBySystemId(systemId);
+    if (system == null) return;
+
+    try {
+      final dio = _clientFactory.forSystem(systemId);
+      await dio.post<Map<String, dynamic>>(
+        '${system.baseUrl}/api/v1/agent/heartbeat',
+        data: <String, dynamic>{},
+      );
+      _log.d('[WS] Heartbeat sent for system $systemId');
+    } catch (e) {
+      _log.w('[WS] Heartbeat failed (non-fatal): $e');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -148,9 +187,18 @@ class AgentWebSocketService {
     _log.i('[WS] Connecting to $wsUri');
 
     try {
+      // Cancel any stale listener from the previous connection before creating
+      // a new channel. Without this, the old stream's onDone fires when the
+      // old channel eventually closes and triggers a second reconnect loop.
+      await _subscription?.cancel();
+      _subscription = null;
+      _channel?.sink.close();
+      _channel = null;
+      _socketId = null;
+
       _channel = WebSocketChannel.connect(wsUri);
 
-      _channel!.stream.listen(
+      _subscription = _channel!.stream.listen(
         (raw) => _handleRawMessage(systemId, raw as String),
         onDone: () => _scheduleReconnect(systemId),
         onError: (e) {
@@ -187,8 +235,10 @@ class AgentWebSocketService {
           _send({'event': 'pusher:pong', 'data': {}});
         case 'pusher_internal:subscription_succeeded':
           _log.i('[WS] Subscribed to private-agent.$systemId');
+          _startHeartbeat(systemId);
         case 'pusher_internal:subscription_error':
-          _log.e('[WS] Subscription error — retrying auth');
+          _log.e('[WS] Subscription error — scheduling reconnect');
+          _scheduleReconnect(systemId);
         case 'App\\Events\\AgentCommandDispatched':
         case 'agent.command':
           await _onAgentCommand(data);
@@ -290,6 +340,8 @@ class AgentWebSocketService {
 
   void _scheduleReconnect(String systemId) {
     _log.w('[WS] Scheduling reconnect in ${_reconnectDelaySecs}s');
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(seconds: _reconnectDelaySecs), () {
       _reconnectDelaySecs =

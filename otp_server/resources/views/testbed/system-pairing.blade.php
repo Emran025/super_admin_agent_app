@@ -414,19 +414,24 @@
 
         <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
         <script>
+            // Only encode what the mobile scanner actually reads: system_id,
+            // capabilities, and is_test. Omitting api_token (64 chars) and
+            // encryption_key (44 chars) cuts the payload from ~210 to ~80
+            // characters, dropping the QR from version 7-8 to version 3-4.
+            // Combined with correctLevel.L (7 % vs 30 % redundancy) the
+            // resulting code has far fewer, larger cells — faster to capture.
             const config = JSON.stringify({
                 system_id: "{{ $newSystem->id }}",
-                api_token: "{{ $newToken }}",
-                encryption_key: "{{ $newKey }}",
                 capabilities: JSON.parse(document.getElementById('qrcode').dataset.capabilities),
                 is_test: true
             });
             new QRCode(document.getElementById('qrcode'), {
                 text: config,
-                width: 200,
-                height: 200,
-                colorDark: '#f8fafc',
-                colorLight: '#0f172a',
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.L,
             });
         </script>
         @endif

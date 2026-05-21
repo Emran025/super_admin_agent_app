@@ -18,9 +18,10 @@ Route::get('/testbed', function () {
     $isAgentConnected = $agent ? $agent->isOnline() : false;
     $agentId = $agent ? $agent->agent_id : null;
     
-    // Show QR code if no agent exists, or if agent is offline AND has not been seen for 24h
-    $lastSeenWithin24h = $agent && $agent->last_seen_at && $agent->last_seen_at->greaterThanOrEqualTo(now()->subHours(24));
-    $showQrCode = !$agent || (!$isAgentConnected && !$lastSeenWithin24h);
+    // Show QR code only when no agent has ever been paired.
+    // Once an agent is in the database the pairing is permanent — the QR is
+    // only needed for the very first setup. Use the "Unpair" action to reset.
+    $showQrCode = !$agent;
     
     $qrCodeData = null;
     if ($showQrCode) {

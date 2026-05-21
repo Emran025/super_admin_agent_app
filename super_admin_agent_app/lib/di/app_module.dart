@@ -63,11 +63,16 @@ Future<void> setupDependencies() async {
   );
 
   // 2. Signing service — uses secure storage for key material.
+  //    Load any existing key pair immediately so publicKeyId is populated
+  //    in both the UI isolate and the background service isolate at startup.
+  //    Without this, the signing interceptor sends an empty X-Agent-Public-Key-Id
+  //    header and every authenticated request returns HTTP 401.
   getIt.registerLazySingleton<SigningService>(
     () => AndroidKeystoreSigningService(
       secureStorage: getIt<SecureStorageService>(),
     ),
   );
+  await getIt<SigningService>().loadExistingKeyPair();
 
   // 3. Nonce generator — stateless, const.
   getIt.registerLazySingleton<NonceGenerator>(

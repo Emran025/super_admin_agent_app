@@ -79,7 +79,7 @@ class PairingController extends Controller
         }
 
         $reverbPort = (int) config('otp_server.reverb_port', 8080);
-        $reverbScheme = env('REVERB_SCHEME');
+        $reverbScheme = config('otp_server.reverb_scheme', env('REVERB_SCHEME', 'http'));
         if ($request->secure() || $reverbScheme === 'https') {
             if (empty(env('REVERB_PORT')) || $reverbPort === 8080) {
                 $reverbPort = 443;

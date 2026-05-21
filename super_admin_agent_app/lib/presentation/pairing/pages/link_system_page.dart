@@ -25,6 +25,10 @@ class _LinkSystemPageState extends State<LinkSystemPage>
     with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     autoStart: false,
+    // Restrict to QR codes only — without this MLKit runs all 15+ detectors
+    // (EAN, Code128, DataMatrix, PDF417, Aztec…) on every frame, which is
+    // the primary reason scanning feels slow.
+    formats: const [BarcodeFormat.qrCode],
   );
   Map<String, dynamic>? _scannedData;
   bool _isLoading = false;

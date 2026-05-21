@@ -53,6 +53,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
   Future<void> loadSystems(String gatewaySystemId) async {
     emit(LinkedSystemsLoading());
     final result = await _getUseCase.execute(gatewaySystemId: gatewaySystemId);
+    if (isClosed) return;
     result.fold(
       (failure) => emit(const LinkedSystemsError('Failed to load linked systems')),
       (systems) => emit(LinkedSystemsLoaded(systems)),
@@ -67,6 +68,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
       gatewaySystemId: gatewaySystemId,
       systemId: systemId,
     );
+    if (isClosed) return null;
     return result.fold(
       (failure) {
         String msg = 'Failed to link system';
@@ -85,7 +87,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
         } else {
           loadSystems(gatewaySystemId);
         }
-        return null; // success
+        return null;
       },
     );
   }
@@ -98,6 +100,7 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
       gatewaySystemId: gatewaySystemId,
       systemId: systemId,
     );
+    if (isClosed) return;
     result.fold(
       (failure) => emit(const LinkedSystemsError('Failed to unlink system')),
       (_) {

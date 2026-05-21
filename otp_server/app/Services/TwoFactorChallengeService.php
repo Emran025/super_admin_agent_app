@@ -31,10 +31,14 @@ class TwoFactorChallengeService
      */
     public function issue(string $challengedUsername, int $expirySeconds = 120): TwoFactorChallenge
     {
-        // Accept any paired agent in the testbed — capability check is lenient
-        // so testers can try the flow without reconfiguring capabilities.
-        $agent = Agent::where('capabilities', 'like', '%two_fa%')->first()
-            ?? Agent::firstOrFail();
+        $agent = Agent::where('capabilities', 'like', '%two_fa%')->first();
+
+        if ($agent === null) {
+            throw new RuntimeException(
+                'No agent with the two_fa capability is paired. '
+                . 'Pair a mobile agent before issuing 2FA challenges.'
+            );
+        }
 
         $challenge = TwoFactorChallenge::create([
             'agent_id'            => $agent->agent_id,

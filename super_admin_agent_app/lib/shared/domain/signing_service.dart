@@ -36,6 +36,14 @@ abstract class SigningService {
   /// Called once during the pairing ceremony.
   Future<Either<SigningFailure, void>> generateKeyPair();
 
+  /// Loads an existing key pair from secure storage into memory.
+  ///
+  /// Call this at app startup (both UI and background isolates) so that
+  /// [publicKeyId] and [getPublicKeyBase64] are always populated when a
+  /// key pair has previously been generated. Unlike [generateKeyPair], this
+  /// never creates a new key — it is a no-op when no key exists.
+  Future<void> loadExistingKeyPair();
+
   /// Returns true when a key pair has been generated and is stored.
   Future<bool> hasKeyPair();
 

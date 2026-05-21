@@ -5,7 +5,7 @@ namespace App\Events;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -18,7 +18,7 @@ use Illuminate\Queue\SerializesModels;
  * Payload mirrors the former FCM data payload — the router on the Flutter side
  * is structurally identical; only the transport layer changes.
  */
-class AgentCommandDispatched implements ShouldBroadcast
+class AgentCommandDispatched implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 

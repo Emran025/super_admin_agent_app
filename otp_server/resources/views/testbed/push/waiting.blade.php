@@ -1,3 +1,4 @@
+{{-- @var string $reverbScheme --}}
 {{-- @var string $reverbHost --}}
 {{-- @var int $reverbPort --}}
 {{-- @var string $reverbAppKey --}}
@@ -210,6 +211,7 @@
 <body>
 
     <div class="card" id="card"
+        data-reverb-scheme='@json($reverbScheme)'
         data-reverb-host='@json($reverbHost)'
         data-reverb-port='@json($reverbPort)'
         data-reverb-app-key='@json($reverbAppKey)'
@@ -273,6 +275,7 @@
             }
         }
 
+        const REVERB_SCHEME = _maybeParse(_ds.reverbScheme) || 'ws';
         const REVERB_HOST = _maybeParse(_ds.reverbHost);
         const REVERB_PORT = _maybeParse(_ds.reverbPort);
         const REVERB_APP_KEY = _maybeParse(_ds.reverbAppKey);
@@ -354,7 +357,7 @@
         // Uses the Pusher JS client which Reverb is 100% compatible with.
         // The public channel push-2fa-result.{challengeId} requires no auth.
         (function connectReverb() {
-            const wsUrl = `ws://${REVERB_HOST}:${REVERB_PORT}/app/${REVERB_APP_KEY}?protocol=7&client=js-testbed&version=1.0`;
+            const wsUrl = `${REVERB_SCHEME}://${REVERB_HOST}:${REVERB_PORT}/app/${REVERB_APP_KEY}?protocol=7&client=js-testbed&version=1.0`;
             let socket;
 
             try {

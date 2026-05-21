@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dartz/dartz.dart';
@@ -50,6 +51,13 @@ class AndroidKeystoreSigningService implements SigningService {
   Future<bool> hasKeyPair() async {
     final result = await _secureStorage.read(key: _privateKeyStorageKey);
     return result.fold((_) => false, (v) => v != null);
+  }
+
+  @override
+  Future<void> loadExistingKeyPair() async {
+    if (await hasKeyPair()) {
+      await _loadCachedPublicKey();
+    }
   }
 
   @override
@@ -258,8 +266,9 @@ class AndroidKeystoreSigningService implements SigningService {
 
   FortunaRandom _buildSecureRandom() {
     final secureRandom = FortunaRandom();
+    final rng = Random.secure();
     final seed = Uint8List.fromList(
-      List<int>.generate(32, (_) => DateTime.now().microsecondsSinceEpoch & 0xFF),
+      List<int>.generate(32, (_) => rng.nextInt(256)),
     );
     secureRandom.seed(KeyParameter(seed));
     return secureRandom;

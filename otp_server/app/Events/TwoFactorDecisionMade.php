@@ -4,7 +4,7 @@ namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -23,7 +23,7 @@ use Illuminate\Queue\SerializesModels;
  * The JS listener receives { decision: 'approved' | 'rejected' } and immediately
  * redirects or shows an error message in the waiting UI.
  */
-class TwoFactorDecisionMade implements ShouldBroadcast
+class TwoFactorDecisionMade implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 

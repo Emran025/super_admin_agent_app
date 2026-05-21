@@ -141,11 +141,20 @@ class PushTwoFactorTestController extends Controller
                 ->withErrors(['credentials' => 'Push 2FA rejected by the agent. Access denied.']);
         }
 
+        // Derive the public-facing Reverb connection parameters from the
+        // incoming HTTP request so the browser-side WebSocket can reach
+        // Reverb through the same public hostname and TLS termination point
+        // as the mobile agent, instead of the internal bind address.
+        $reverbScheme = $request->secure() ? 'wss' : 'ws';
+        $reverbHost   = $request->getHost();
+        $reverbPort   = $request->secure() ? 443 : (int) config('otp_server.reverb_port', 8080);
+
         return view('testbed.push.waiting', [
             'challengeId'  => $challengeId,
             'expiresAt'    => $challenge->expires_at->toIso8601String(),
-            'reverbHost'   => config('otp_server.reverb_host', 'localhost'),
-            'reverbPort'   => config('otp_server.reverb_port', 8080),
+            'reverbScheme' => $reverbScheme,
+            'reverbHost'   => $reverbHost,
+            'reverbPort'   => $reverbPort,
             'reverbAppKey' => config('otp_server.reverb_app_key', ''),
         ]);
     }
