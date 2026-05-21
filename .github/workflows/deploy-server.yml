@@ -38,6 +38,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          script_stop: true
           script: |
             # 1. الانتقال إلى مجلد المشروع
             cd /home/${{ secrets.HESTIA_USERNAME }}/web/${{ secrets.PROJECT_DOMAIN }}/public_html
@@ -49,7 +50,10 @@ jobs:
 
             # 3. تثبيت الحزم كاملة (مع dev) للسماح بتشغيل الـ Seeders
             composer install --no-interaction --prefer-dist --optimize-autoloader
-
+            
+            # مسح الكاش القديم لضمان قراءة ملف .env الجديد
+            php artisan config:clear
+            
             # 4. تنفيذ Migrations
             php artisan migrate --force
 
