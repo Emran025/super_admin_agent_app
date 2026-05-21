@@ -69,8 +69,22 @@ class PairingController extends Controller
                 'public_key_id'    => $data['public_key_id'],
                 'capabilities'     => ['otp_gateway', 'two_fa', 'payment_observation'],
                 'paired_at'        => $pairedAt,
+                'last_seen_at'     => $pairedAt,
             ]
         );
+
+        $reverbHost = config('otp_server.reverb_host');
+        if (empty($reverbHost) || $reverbHost === 'localhost' || $reverbHost === '127.0.0.1') {
+            $reverbHost = $request->getHost();
+        }
+
+        $reverbPort = (int) config('otp_server.reverb_port', 8080);
+        $reverbScheme = env('REVERB_SCHEME');
+        if ($request->secure() || $reverbScheme === 'https') {
+            if (empty(env('REVERB_PORT')) || $reverbPort === 8080) {
+                $reverbPort = 443;
+            }
+        }
 
         return response()->json([
             'agent_id'             => $agent->agent_id,
@@ -79,9 +93,9 @@ class PairingController extends Controller
             'base_url'             => config('app.url'),
             'granted_capabilities' => $agent->capabilities,
             'paired_at'            => $agent->paired_at->toIso8601String(),
-            'reverb_host'          => config('otp_server.reverb_host', 'localhost'),
-            'reverb_port'          => (int) config('otp_server.reverb_port', 8080),
-            'reverb_app_key'       => config('otp_server.reverb_app_key', ''),
+            'reverb_host'          => $reverbHost,
+            'reverb_port'          => $reverbPort,
+            'reverb_app_key'       => config('otp_server.reverb_app_key', 'super-admin-reverb-key'),
         ], 201);
     }
 
