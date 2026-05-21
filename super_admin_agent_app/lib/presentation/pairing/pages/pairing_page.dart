@@ -251,8 +251,7 @@ class _ConfirmationView extends StatelessWidget {
                   isUrl: true,
                 ),
                 Divider(color: cs.outline, height: SpacingTokens.lg),
-                _CapabilitiesBlock(
-                    capabilities: token.capabilities),
+                _AgentRoleBlock(capabilities: token.capabilities),
               ],
             ),
           ),
@@ -319,74 +318,74 @@ class _InfoBlock extends StatelessWidget {
   }
 }
 
-class _CapabilitiesBlock extends StatelessWidget {
+/// Displays the agent's role as the primary master agent.
+/// The capabilities list from the QR code represents server-supported
+/// modules — NOT restricted grants. The agent has full authority.
+class _AgentRoleBlock extends StatelessWidget {
   final List<String> capabilities;
-  const _CapabilitiesBlock({required this.capabilities});
+  const _AgentRoleBlock({required this.capabilities});
+
+  static const _moduleLabels = {
+    'otp_gateway': 'SMS OTP Gateway',
+    'two_fa': '2FA Push Approvals',
+    'payment_observation': 'Payment Observation',
+  };
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
 
+    final modules = capabilities
+        .map((c) => _moduleLabels[c] ?? c)
+        .toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(Icons.rule, size: 14, color: cs.onSurfaceVariant),
+            Icon(Icons.shield_outlined, size: 14, color: ColorTokens.emerald500),
             const SizedBox(width: SpacingTokens.xs),
-            Text('GRANTED CAPABILITIES',
-                style: tt.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant, letterSpacing: 1.0)),
+            Text(
+              'AGENT ROLE',
+              style: tt.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant, letterSpacing: 1.0),
+            ),
           ],
         ),
         const SizedBox(height: SpacingTokens.sm),
-        capabilities.isEmpty
-            ? Text('None',
-                style:
-                    tt.bodySmall?.copyWith(color: cs.onSurfaceVariant))
-            : Wrap(
-                spacing: SpacingTokens.xs,
-                runSpacing: SpacingTokens.xs,
-                children: capabilities
-                    .map((c) => _CapabilityBadge(cap: c))
-                    .toList(),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: ColorTokens.emerald500.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(RadiusTokens.sm.toDouble()),
+            border: Border.all(color: ColorTokens.emerald500.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.verified_user, size: 14, color: ColorTokens.emerald500),
+              const SizedBox(width: 6),
+              Text(
+                'Primary Gateway Agent',
+                style: TextStyle(
+                  color: ColorTokens.emerald500,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+            ],
+          ),
+        ),
+        if (modules.isNotEmpty) ...[
+          const SizedBox(height: SpacingTokens.sm),
+          Text(
+            'Active server modules: ${modules.join(' · ')}',
+            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
       ],
-    );
-  }
-}
-
-class _CapabilityBadge extends StatelessWidget {
-  final String cap;
-  const _CapabilityBadge({required this.cap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final (label, color) = switch (cap) {
-      'otp_gateway' => ('SMS Gateway', ColorTokens.emerald500),
-      'two_fa' => ('2FA Push', cs.primary),
-      'payment_observation' => ('Payment Watch', cs.secondary),
-      _ => (cap, cs.onSurfaceVariant),
-    };
-
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius:
-            BorderRadius.circular(RadiusTokens.sm.toDouble()),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-            color: color,
-            fontSize: 11,
-            fontWeight: FontWeight.w700),
-      ),
     );
   }
 }

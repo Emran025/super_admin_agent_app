@@ -139,10 +139,8 @@ class PairingRepositoryImpl implements PairingRepository {
       await _saveReverbParams(dto);
 
       return Right(dto.toEntity());
-    } on DioException catch (e) {
-      return Left(RegistrationFailure(e.message ?? 'Network error'));
     } catch (e) {
-      return Left(RegistrationFailure(e.toString()));
+      return Left(_handleNetworkException(e));
     }
   }
 
@@ -262,10 +260,8 @@ class PairingRepositoryImpl implements PairingRepository {
 
       final systemJson = body['system'] as Map<String, dynamic>;
       return Right(LinkedSystem.fromJson(systemJson));
-    } on DioException catch (e) {
-      return Left(RegistrationFailure(e.message ?? 'Network error'));
     } catch (e) {
-      return Left(RegistrationFailure(e.toString()));
+      return Left(_handleNetworkException(e, 'Failed to link system'));
     }
   }
 
@@ -289,10 +285,8 @@ class PairingRepositoryImpl implements PairingRepository {
       }
 
       return const Right(null);
-    } on DioException catch (e) {
-      return Left(RegistrationFailure(e.message ?? 'Network error'));
     } catch (e) {
-      return Left(RegistrationFailure(e.toString()));
+      return Left(_handleNetworkException(e, 'Failed to unlink system'));
     }
   }
 
@@ -318,10 +312,75 @@ class PairingRepositoryImpl implements PairingRepository {
           .map((e) => LinkedSystem.fromJson(e as Map<String, dynamic>))
           .toList();
       return Right(systems);
-    } on DioException catch (e) {
-      return Left(RegistrationFailure(e.message ?? 'Network error'));
     } catch (e) {
-      return Left(RegistrationFailure(e.toString()));
+      return Left(_handleNetworkException(e, 'Failed to fetch linked systems'));
     }
+  }
+
+  // Helper to translate Dio and other exceptions into friendly errors
+  PairingFailure _handleNetworkException(Object e, [String defaultMsg = 'Network error']) {
+    if (e is DioException) {
+      final error = e.error;
+      
+      // Check for timeout
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return const RegistrationFailure(
+          'انتهت مهلة الاتصال بالخادم. يرجى التحقق من جودة اتصال الإنترنت والمحاولة مرة أخرى (Connection Timeout).',
+        );
+      }
+      
+      // Check for SocketException
+      if (error != null && error.toString().contains('SocketException')) {
+        final errStr = error.toString();
+        if (errStr.contains('Failed host lookup') || errStr.contains('errno = 7') || errStr.contains('No address associated with hostname')) {
+          return const RegistrationFailure(
+            'فشل الاتصال: لم يتم العثور على عنوان السيرفر (خطأ في DNS). تأكد من صحة الرابط/الدومين، ومن أن الهاتف متصل بإنترنت فعال وبإمكانه الوصول للموقع.',
+          );
+        } else if (errStr.contains('Connection refused') || errStr.contains('errno = 111')) {
+          return const RegistrationFailure(
+            'فشل الاتصال: رفض السيرفر الاتصال بالمنفذ المطلوب. تأكد من أن السيرفر يعمل وأن بورت الويب وسيرفر WebSockets مفتوحين.',
+          );
+        } else {
+          return RegistrationFailure(
+            'خطأ في الشبكة (SocketException): ${e.message ?? errStr}',
+          );
+        }
+      }
+      
+      // Handle bad response status codes
+      if (e.type == DioExceptionType.badResponse) {
+        final statusCode = e.response?.statusCode;
+        final responseData = e.response?.data;
+        String? serverError;
+        if (responseData is Map && responseData.containsKey('error')) {
+          serverError = responseData['error']?.toString();
+        } else if (responseData is Map && responseData.containsKey('message')) {
+          serverError = responseData['message']?.toString();
+        }
+        
+        if (serverError != null && serverError.isNotEmpty) {
+          return RegistrationFailure('خطأ من السيرفر: $serverError');
+        }
+        
+        switch (statusCode) {
+          case 401:
+            return const RegistrationFailure('غير مصرح: رمز الربط (Token) غير صالح أو انتهت صلاحيته.');
+          case 403:
+            return const RegistrationFailure('مرفوض: التوقيع الرقمي غير صالح أو تم رفض الطلب من السيرفر.');
+          case 404:
+            return const RegistrationFailure('فشل الاتصال: الرابط المطلوب غير موجود على السيرفر (404).');
+          case 500:
+            return const RegistrationFailure('خطأ داخلي في السيرفر (500). يرجى مراجعة سجلات السيرفر.');
+          default:
+            return RegistrationFailure('استجابة غير صالحة من السيرفر ($statusCode).');
+        }
+      }
+      
+      return RegistrationFailure(e.message ?? defaultMsg);
+    }
+    
+    return RegistrationFailure(e.toString());
   }
 }
