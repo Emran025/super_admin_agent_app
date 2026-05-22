@@ -36,24 +36,13 @@ Future<void> main() async {
   //    permissions (required on Android 13+) are requested/granted first.
   await const PermissionHandlerService().requestAll();
 
-  // 3. Initialise the Android Foreground Service.
-  //    This keeps the process alive through Doze mode, ensuring the WebSocket
-  //    connection is never killed by the OS in the background.
-  //    NOTE: SqliteAuditLogService.init() is intentionally NOT called here.
-  //    The audit log database is opened exclusively inside the background
-  //    service isolate (_onStart). Calling it in both the UI isolate and the
-  //    background isolate simultaneously causes sqflite to race on the same
-  //    SQLite file, corrupting the internal transaction state and crashing with
-  //    "Cannot perform this operation because there is no current transaction".
-  await AgentForegroundService.init();
-
-  // 4. Wire all services into the DI container.
+  // 3. Wire all services into the DI container.
   await setupDependencies();
 
-  // 5. Load all paired systems into the in-memory registry.
+  // 4. Load all paired systems into the in-memory registry.
   await getIt<PairedSystemRegistry>().reload();
 
-  // 6. Listen for 2FA challenge approval requests from the background service isolate.
+  // 5. Listen for 2FA challenge approval requests from the background service isolate.
   FlutterBackgroundService().on('show_challenge').listen((event) {
     if (event != null) {
       final commandId = event['commandId'] as String?;
@@ -64,8 +53,24 @@ Future<void> main() async {
     }
   });
 
-  // 8. Start the app.
+  // 6. Start the app — render the first frame ASAP.
   runApp(const SuperAdminAgentApp());
+
+  // 7. Initialise the Android Foreground Service AFTER the first frame.
+  //    The background service spawns a separate Dart isolate that performs
+  //    heavy I/O (SQLite init, DI wiring, SecureStorage reads, WebSocket
+  //    connect). Starting it before runApp() forces the main thread to
+  //    compete for resources, causing 200–250 frame drops on low-end
+  //    devices (e.g. Redmi 9A / M2006C3LC).
+  //    NOTE: SqliteAuditLogService.init() is intentionally NOT called here.
+  //    The audit log database is opened exclusively inside the background
+  //    service isolate (_onStart). Calling it in both the UI isolate and the
+  //    background isolate simultaneously causes sqflite to race on the same
+  //    SQLite file, corrupting the internal transaction state and crashing with
+  //    "Cannot perform this operation because there is no current transaction".
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await AgentForegroundService.init();
+  });
 }
 
 /// Dynamic dialog dispatcher for background-triggered 2FA authentication challenges.

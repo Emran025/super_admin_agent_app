@@ -517,16 +517,24 @@ class _DashboardPageState extends State<DashboardPage> {
                             const SizedBox(height: 4),
                             Wrap(
                               spacing: 4,
+                              runSpacing: 4,
                               children: linkedSystem.capabilities.map((c) {
+                                final (label, color) = switch (c) {
+                                  'otp' || 'otp_gateway' => ('SMS Gateway', ColorTokens.emerald500),
+                                  'super_admin_login' || 'two_fa' => ('2FA Push', cs.primary),
+                                  'payment' || 'payment_observation' => ('Payment Watch', cs.secondary),
+                                  _ => (c, cs.onSurfaceVariant),
+                                };
                                 return Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                                   decoration: BoxDecoration(
-                                    color: cs.onSurface.withValues(alpha: 0.06),
+                                    color: color.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(RadiusTokens.xs),
+                                    border: Border.all(color: color.withValues(alpha: 0.3)),
                                   ),
                                   child: Text(
-                                    c,
-                                    style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, fontWeight: FontWeight.bold),
+                                    label,
+                                    style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.bold),
                                   ),
                                 );
                               }).toList(),

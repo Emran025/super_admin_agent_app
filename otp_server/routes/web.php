@@ -26,11 +26,26 @@ Route::get('/testbed', function () {
     $qrCodeData = null;
     if ($showQrCode) {
         // Resolve public Reverb connection parameters for the mobile agent.
-        // REVERB_HOST / REVERB_PORT are internal bind addresses (0.0.0.0 / 8080).
-        // The agent needs the public-facing host and port reachable from outside.
-        $reverbHost   = request()->getHost();  // always use the incoming request host
-        $reverbPort   = (int) (env('REVERB_PORT') ?: 8080);
-        $reverbScheme = env('REVERB_SCHEME', 'http');
+        //
+        // REVERB_HOST / REVERB_PORT are *internal* bind addresses (0.0.0.0 / 8080).
+        // The phone connects from outside, so it needs the public-facing host/port.
+        //
+        // Port resolution priority:
+        //   1. REVERB_PUBLIC_PORT env var   — explicit override for unusual setups
+        //   2. APP_URL uses https://         — reverse proxy terminates TLS on 443;
+        //                                      internal port is never reachable externally
+        //   3. Fallback                      — use REVERB_PORT (local dev, plain HTTP)
+        $reverbHost   = request()->getHost();
+        $appUrl       = config('app.url', '');
+        $isHttps      = str_starts_with($appUrl, 'https://');
+        if (env('REVERB_PUBLIC_PORT')) {
+            $reverbPort = (int) env('REVERB_PUBLIC_PORT');
+        } elseif ($isHttps) {
+            $reverbPort = 443;
+        } else {
+            $reverbPort = (int) (env('REVERB_PORT') ?: 8080);
+        }
+        $reverbScheme = $isHttps ? 'wss' : 'ws';
         $reverbAppKey = config('otp_server.reverb_app_key', 'super-admin-reverb-key');
 
         $qrCodeData = json_encode([

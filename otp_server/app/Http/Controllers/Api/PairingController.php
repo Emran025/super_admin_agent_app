@@ -80,17 +80,27 @@ class PairingController extends Controller
             $reverbHost = $request->getHost();
         }
 
-        // Use the explicitly configured REVERB_PORT. Only fall back to 443
-        // when the env var is not set at all — never silently override an
-        // explicit port value (e.g. 8080) just because the request is HTTPS.
-        $reverbPort   = (int) (env('REVERB_PORT') ?: 8080);
-        $reverbScheme = config('otp_server.reverb_scheme', 'http');
-
-        // If the scheme is explicitly https (production TLS proxy), publish
-        // 443 only when no explicit port has been configured.
-        if ($reverbScheme === 'https' && empty(env('REVERB_PORT'))) {
+        // Determine the *public-facing* WebSocket port the phone must connect to.
+        //
+        // REVERB_PORT is the internal bind port (e.g. 8080).  When a reverse
+        // proxy (nginx, Replit, Cloudflare …) terminates TLS in front of the
+        // server, the phone must connect on 443 — the internal port is never
+        // reachable from outside.
+        //
+        // Priority:
+        //   1. REVERB_PUBLIC_PORT env var  — explicit override for unusual setups
+        //   2. APP_URL uses https://        — proxy on 443, internal port irrelevant
+        //   3. Fallback                     — REVERB_PORT (local dev / plain HTTP)
+        $appUrl  = config('app.url', '');
+        $isHttps = str_starts_with($appUrl, 'https://');
+        if (env('REVERB_PUBLIC_PORT')) {
+            $reverbPort = (int) env('REVERB_PUBLIC_PORT');
+        } elseif ($isHttps) {
             $reverbPort = 443;
+        } else {
+            $reverbPort = (int) (env('REVERB_PORT') ?: 8080);
         }
+        $reverbScheme = $isHttps ? 'wss' : 'ws';
 
         return response()->json([
             'agent_id'             => $agent->agent_id,

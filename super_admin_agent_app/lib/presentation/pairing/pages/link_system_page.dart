@@ -396,9 +396,9 @@ class _LinkSystemPageState extends State<LinkSystemPage>
   Widget _capabilityBadge(String cap) {
     final cs = Theme.of(context).colorScheme;
     final (label, color) = switch (cap) {
-      'otp_gateway' => ('SMS Gateway', ColorTokens.emerald500),
-      'two_fa' => ('2FA Push', cs.primary),
-      'payment_observation' => ('Payment Watch', cs.secondary),
+      'otp' || 'otp_gateway' => ('SMS Gateway', ColorTokens.emerald500),
+      'super_admin_login' || 'two_fa' => ('2FA Push', cs.primary),
+      'payment' || 'payment_observation' => ('Payment Watch', cs.secondary),
       _ => (cap, cs.onSurfaceVariant),
     };
 

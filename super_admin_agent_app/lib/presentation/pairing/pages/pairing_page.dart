@@ -90,13 +90,13 @@ class _IdleView extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
 
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(
           horizontal: SpacingTokens.lg, vertical: SpacingTokens.md),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Spacer(),
           // Shield icon with concentric glow rings
           Center(
             child: Container(
@@ -153,7 +153,7 @@ class _IdleView extends StatelessWidget {
               ],
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: SpacingTokens.lg),
           CustomButton(
             label: 'Pair with System',
             icon: Icons.qr_code_scanner,

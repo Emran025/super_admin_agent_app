@@ -12,7 +12,10 @@ class SecureStorageServiceImpl implements SecureStorageService {
 
   SecureStorageServiceImpl()
       : _storage = const FlutterSecureStorage(
-          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          aOptions: AndroidOptions(
+            encryptedSharedPreferences: true,
+            resetOnError: true,
+          ),
         );
 
   @override
