@@ -264,6 +264,51 @@
         </p>
     </div>
 
+    
+    <?php if($agent): ?>
+    <div class="card card-full" style="margin-bottom: 2rem; border-color: #1e3a5f; background: #0a1628;">
+        <h2 style="font-size: 1rem; color: #94a3b8; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Connection Diagnostics
+        </h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.8125rem;">
+            <div>
+                <div style="color: #64748b; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">API Base URL (phone → server)</div>
+                <code style="color: #93c5fd; word-break: break-all;"><?php echo e(config('app.url')); ?></code>
+            </div>
+            <div>
+                <div style="color: #64748b; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">WebSocket URL (phone → Reverb)</div>
+                <code style="color: #93c5fd; word-break: break-all;">
+                    <?php echo e(str_starts_with(config('app.url'), 'https') ? 'wss' : 'ws'); ?>://<?php echo e(parse_url(config('app.url'), PHP_URL_HOST)); ?>:<?php echo e(env('REVERB_PORT', 8080)); ?>/app/<?php echo e(env('REVERB_APP_KEY')); ?>
+
+                </code>
+            </div>
+            <div>
+                <div style="color: #64748b; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Channel</div>
+                <code style="color: #a5f3fc;">private-agent.<?php echo e($agent->system_id); ?></code>
+            </div>
+            <div>
+                <div style="color: #64748b; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Last Seen (live)</div>
+                <span id="last-seen-value" style="color: <?php echo e($agent->last_seen_at ? '#4ade80' : '#f87171'); ?>;">
+                    <?php echo e($agent->last_seen_at ? $agent->last_seen_at->diffForHumans() : 'Never — no heartbeat received yet'); ?>
+
+                </span>
+            </div>
+        </div>
+        <div style="margin-top: 1rem; padding: 0.75rem; background: #0f172a; border-radius: 8px; font-size: 0.75rem; color: #64748b; line-height: 1.6;">
+            <strong style="color: #94a3b8;">How connection tracking works:</strong>
+            The server marks a device as <span style="color: #4ade80;">Online</span> when its
+            <code>last_seen_at</code> was updated within the last 60 seconds. This timestamp is
+            refreshed on every heartbeat call (<code>POST /api/v1/agent/heartbeat</code>, sent
+            every 30 s by the app) and on every WebSocket channel re-authentication. If the
+            timestamp is <em>Never</em>, the phone has never successfully reached this server's
+            API — usually because it is still pointed at a different server from a previous pairing.
+            <strong style="color: #fbbf24;">Unpair and re-pair</strong> the phone by scanning the
+            QR code on this server to fix the connection.
+        </div>
+    </div>
+    <?php endif; ?>
+
     <?php if($showQrCode): ?>
         <div class="card card-full" style="border-color: #7c3aed; background: #121026; margin-bottom: 2rem;">
             <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem; padding: 1rem 0;">
@@ -290,8 +335,8 @@
         <div class="card card-full" style="border-color: #166534; background: #0b1a11; margin-bottom: 2rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
                 <div>
-                    <h2 style="display: flex; align-items: center; gap: 0.5rem; color: #4ade80;">
-                        <span class="status-dot <?php echo e($isAgentConnected ? 'connected' : 'disconnected'); ?>"></span>
+                    <h2 id="agent-status-heading" style="display: flex; align-items: center; gap: 0.5rem; color: #4ade80;">
+                        <span id="agent-status-dot" class="status-dot <?php echo e($isAgentConnected ? 'connected' : 'disconnected'); ?>"></span>
                         Mobile Agent: <?php echo e($isAgentConnected ? 'Online' : 'Offline'); ?>
 
                     </h2>
@@ -301,7 +346,7 @@
                     <div style="margin-top: 1rem; font-size: 0.8125rem; color: #cbd5e1; display: grid; gap: 0.25rem; text-align: left;">
                         <div><strong>Agent ID:</strong> <code class="mono" style="color: #e2e8f0;"><?php echo e($agent->agent_id); ?></code></div>
                         <div><strong>Public Key ID:</strong> <code class="mono" style="color: #e2e8f0;"><?php echo e($agent->public_key_id); ?></code></div>
-                        <div><strong>Last Seen:</strong> <span style="color: #e2e8f0;"><?php echo e($agent->last_seen_at ? $agent->last_seen_at->diffForHumans() : 'Never'); ?></span></div>
+                        <div><strong>Last Seen:</strong> <span id="card-last-seen" style="color: #e2e8f0;"><?php echo e($agent->last_seen_at ? $agent->last_seen_at->diffForHumans() : 'Never'); ?></span></div>
                     </div>
                 </div>
                 <div>
@@ -458,14 +503,46 @@
                 height: 300,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
-                // Level L = 7 % error correction (vs default H = 30 %).
-                // The code is displayed on a clean screen so damage recovery
-                // is irrelevant. L produces the fewest modules, making each
-                // cell larger and far easier for a phone camera to resolve.
                 correctLevel: QRCode.CorrectLevel.L,
             });
         </script>
     <?php endif; ?>
+
+    
+    <script>
+    (function () {
+        async function pollStatus() {
+            try {
+                const res = await fetch('/api/agent-status', { cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+
+                // Update status dot + heading
+                const heading = document.getElementById('agent-status-heading');
+                const dot     = document.getElementById('agent-status-dot');
+                if (heading && dot) {
+                    heading.textContent = 'Mobile Agent: ' + (data.online ? 'Online' : 'Offline');
+                    dot.className = 'status-dot ' + (data.online ? 'connected' : 'disconnected');
+                }
+
+                // Update last-seen text
+                const lastSeen = document.getElementById('last-seen-value');
+                if (lastSeen) {
+                    lastSeen.textContent = data.last_seen_human;
+                    lastSeen.style.color = data.last_seen_at ? '#4ade80' : '#f87171';
+                }
+
+                // Update the card-level last seen line
+                const lastSeenCard = document.getElementById('card-last-seen');
+                if (lastSeenCard) {
+                    lastSeenCard.textContent = data.last_seen_human;
+                }
+            } catch (_) {}
+        }
+
+        setInterval(pollStatus, 5000);
+    })();
+    </script>
 
 </body>
 </html>

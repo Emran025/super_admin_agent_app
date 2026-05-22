@@ -26,10 +26,11 @@ Route::get('/testbed', function () {
     $qrCodeData = null;
     if ($showQrCode) {
         // Resolve public Reverb connection parameters for the mobile agent.
-        // REVERB_HOST / REVERB_PORT are internal bind addresses; the agent
-        // needs the public-facing host and port it can reach from outside.
-        $reverbHost = request()->getHost();
-        $reverbPort = request()->secure() ? 443 : (int) request()->getPort();
+        // REVERB_HOST / REVERB_PORT are internal bind addresses (0.0.0.0 / 8080).
+        // The agent needs the public-facing host and port reachable from outside.
+        $reverbHost   = request()->getHost();  // always use the incoming request host
+        $reverbPort   = (int) (env('REVERB_PORT') ?: 8080);
+        $reverbScheme = env('REVERB_SCHEME', 'http');
         $reverbAppKey = config('otp_server.reverb_app_key', 'super-admin-reverb-key');
 
         $qrCodeData = json_encode([
