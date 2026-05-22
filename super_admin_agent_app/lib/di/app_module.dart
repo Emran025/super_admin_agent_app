@@ -69,16 +69,13 @@ Future<void> setupDependencies() async {
     ),
   );
   // Load any existing key pair so publicKeyId is populated at startup.
-  // Wrapped in try-catch because the Android Keystore can be unreliable on
-  // low-end devices (e.g. Redmi 9A: BpBinder transact took 4488 ms, then
-  // ProviderException). A failure here is non-fatal — the signing key will
-  // be loaded lazily on first authenticated request, and the background
-  // service isolate performs its own independent loadExistingKeyPair().
-  try {
-    await getIt<SigningService>().loadExistingKeyPair();
-  } catch (e) {
-    // ignore — key will be retried on first signing call
-  }
+  // NOTE: This is intentionally NOT awaited here to avoid blocking the main
+  // thread with SecureStorage reads (BpBinder transact takes 200-500ms on
+  // low-end devices like Redmi 9A). The signing key will be loaded:
+  //   a) Lazily on the first authenticated request (first sign() call).
+  //   b) Independently by the background service isolate (_onStart).
+  // This is safe because no authenticated call can occur before the
+  // background isolate is running and has loaded its own key pair.
 
   // 3. Nonce generator — stateless, const.
   getIt.registerLazySingleton<NonceGenerator>(

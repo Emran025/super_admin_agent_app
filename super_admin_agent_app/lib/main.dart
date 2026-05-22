@@ -31,18 +31,18 @@ Future<void> main() async {
   // 1. Flutter engine must be initialized before any plugin is used.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Request runtime permissions.
-  //    This must happen before starting the foreground service so that notification
-  //    permissions (required on Android 13+) are requested/granted first.
-  await const PermissionHandlerService().requestAll();
-
-  // 3. Wire all services into the DI container.
+  // 2. Wire all services into the DI container.
+  //    NOTE: loadExistingKeyPair() was removed from setupDependencies() to
+  //    avoid blocking the main thread with SecureStorage reads. The signing
+  //    key is loaded lazily on first authenticated request, and the background
+  //    isolate performs its own independent loadExistingKeyPair().
   await setupDependencies();
 
-  // 4. Load all paired systems into the in-memory registry.
+  // 3. Load all paired systems into the in-memory registry.
+  //    This must happen before runApp() so the initial route can be resolved.
   await getIt<PairedSystemRegistry>().reload();
 
-  // 5. Listen for 2FA challenge approval requests from the background service isolate.
+  // 4. Listen for 2FA challenge approval requests from the background service isolate.
   FlutterBackgroundService().on('show_challenge').listen((event) {
     if (event != null) {
       final commandId = event['commandId'] as String?;
@@ -53,22 +53,27 @@ Future<void> main() async {
     }
   });
 
-  // 6. Start the app — render the first frame ASAP.
+  // 5. Start the app — render the first frame ASAP.
   runApp(const SuperAdminAgentApp());
 
-  // 7. Initialise the Android Foreground Service AFTER the first frame.
-  //    The background service spawns a separate Dart isolate that performs
-  //    heavy I/O (SQLite init, DI wiring, SecureStorage reads, WebSocket
-  //    connect). Starting it before runApp() forces the main thread to
-  //    compete for resources, causing 200–250 frame drops on low-end
-  //    devices (e.g. Redmi 9A / M2006C3LC).
-  //    NOTE: SqliteAuditLogService.init() is intentionally NOT called here.
-  //    The audit log database is opened exclusively inside the background
-  //    service isolate (_onStart). Calling it in both the UI isolate and the
-  //    background isolate simultaneously causes sqflite to race on the same
-  //    SQLite file, corrupting the internal transaction state and crashing with
-  //    "Cannot perform this operation because there is no current transaction".
+  // 6. Deferred initialisation — runs AFTER the first frame is painted.
+  //    This keeps the startup-to-first-frame path as lean as possible on
+  //    low-end devices (Redmi 9A / M2006C3LC / Helio G25).
   WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // 6a. Request runtime permissions (shows system dialogs, which don't need
+    //     the app's own UI to be ready yet — Android handles the dialog).
+    const PermissionHandlerService().requestAll();
+
+    // 6b. Start the Android Foreground Service.
+    //     The background service spawns a separate Dart isolate that performs
+    //     heavy I/O (SQLite init, DI wiring, SecureStorage reads, WebSocket
+    //     connect). Starting it before runApp() forces the main thread to
+    //     compete for resources, causing 200–250 frame drops on low-end devices.
+    //     NOTE: SqliteAuditLogService.init() is intentionally NOT called here.
+    //     The audit log database is opened exclusively inside the background
+    //     service isolate (_onStart). Calling it in both the UI isolate and the
+    //     background isolate simultaneously causes sqflite to race on the same
+    //     SQLite file, corrupting the internal transaction state.
     await AgentForegroundService.init();
   });
 }

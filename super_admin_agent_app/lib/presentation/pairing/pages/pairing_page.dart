@@ -449,7 +449,13 @@ class _ScannerViewState extends State<_ScannerView> with WidgetsBindingObserver 
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _controller.start();
+    // Defer camera start to the next frame so the widget tree settles before
+    // camera hardware initialisation begins (CameraDevice.onOpened, BufferQueue
+    // allocations, TFLite model loading). Starting immediately in initState()
+    // causes 100-200 frame drops on low-end devices (Redmi 9A / Helio G25).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.start();
+    });
   }
 
   @override

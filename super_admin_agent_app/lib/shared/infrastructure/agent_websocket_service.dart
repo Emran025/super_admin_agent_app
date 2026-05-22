@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:logger/logger.dart';
+import 'package:super_admin_agent/shared/domain/signing_service.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../di/app_module.dart';
@@ -40,6 +42,13 @@ const _kReverbAppKey = 'reverb_app_key';
 ///   4. Routes all incoming AgentCommandDispatched events to [WsMessageRouter].
 ///   5. Auto-reconnects with exponential back-off on any disconnect or error.
 ///
+/// Connectivity awareness:
+///   When the device loses internet, the service detects this via
+///   [Connectivity] and stops all reconnection timers and heartbeats. It shows
+///   a single "No internet" notification and waits passively for connectivity
+///   to restore before resuming — eliminating the freeze loops caused by
+///   repeated failed connection attempts on the main thread.
+///
 /// Background operation:
 ///   Android Doze mode kills background network connections. To prevent this,
 ///   this service is wrapped by [AgentForegroundService], which runs as an
@@ -57,7 +66,14 @@ class AgentWebSocketService {
   final PairedSystemRegistry _registry;
   final SecureStorageService _secureStorage;
   final HttpClientFactory _clientFactory;
-  final _log = Logger();
+  final _log = Logger(
+    printer: PrettyPrinter(
+      methodCount: 0,
+      errorMethodCount: 3,
+      lineLength: 80,
+      noBoxingByDefault: true,
+    ),
+  );
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
@@ -65,6 +81,25 @@ class AgentWebSocketService {
   Timer? _heartbeatTimer;
   String? _socketId;
   int _reconnectDelaySecs = 2;
+
+  /// The systemId we are currently connected (or trying to connect) to.
+  String? _currentSystemId;
+
+  /// Whether we believe the device currently has internet connectivity.
+  bool _isOnline = true;
+
+  /// Subscription to [Connectivity.onConnectivityChanged].
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
+  /// Whether we are currently in the middle of a connect attempt.
+  /// Prevents overlapping connect calls.
+  bool _isConnecting = false;
+
+  /// Counts consecutive authentication failures (401). Used to detect
+  /// persistent auth problems (empty publicKeyId, revoked agent) and
+  /// stop the reconnect loop instead of hammering the server forever.
+  int _consecutiveAuthFailures = 0;
+  static const int _maxConsecutiveAuthFailures = 3;
 
   static const int _maxReconnectDelaySecs = 60;
   static const String _pusherProtocol = '7';
@@ -97,6 +132,22 @@ class AgentWebSocketService {
     // Use the first system's connection parameters.
     // Multi-system support: iterate and open one connection per system.
     final system = systems.first;
+    _currentSystemId = system.systemId;
+
+    // Start listening for connectivity changes.
+    _startConnectivityMonitoring();
+
+    // Check current connectivity before attempting connection.
+    final hasInternet = await _checkConnectivity();
+    if (!hasInternet) {
+      _log.i('[WS] Device is offline — waiting for connectivity…');
+      _updateNotification(
+        'Agent waiting',
+        'No internet connection — will connect when online',
+      );
+      return;
+    }
+
     await _connectToSystem(system.systemId);
   }
 
@@ -105,11 +156,83 @@ class AgentWebSocketService {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _subscription?.cancel();
     _subscription = null;
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
     _channel?.sink.close();
     _channel = null;
     _socketId = null;
+    _isConnecting = false;
+    _currentSystemId = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Connectivity monitoring
+  // ---------------------------------------------------------------------------
+
+  /// Subscribes to device connectivity changes. When the device goes offline,
+  /// all retry loops and heartbeats are cancelled and a single notification is
+  /// shown. When connectivity is restored, reconnection is initiated.
+  void _startConnectivityMonitoring() {
+    _connectivitySub?.cancel();
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+
+      if (online && !_isOnline) {
+        // Connectivity restored — reconnect.
+        _isOnline = true;
+        _log.i('[WS] Connectivity restored — initiating reconnection');
+        _reconnectDelaySecs = 2; // reset back-off
+        _updateNotification(
+          'Agent reconnecting',
+          'Internet restored — connecting to server…',
+        );
+        if (_currentSystemId != null && !_isConnecting) {
+          _connectToSystem(_currentSystemId!);
+        }
+      } else if (!online && _isOnline) {
+        // Lost connectivity — stop everything.
+        _isOnline = false;
+        _log.w('[WS] Device went offline — pausing all network activity');
+
+        // Cancel any pending reconnection timer.
+        _reconnectTimer?.cancel();
+        _reconnectTimer = null;
+
+        // Cancel heartbeat timer.
+        _heartbeatTimer?.cancel();
+        _heartbeatTimer = null;
+
+        // Close the current channel gracefully.
+        _subscription?.cancel();
+        _subscription = null;
+        _channel?.sink.close();
+        _channel = null;
+        _socketId = null;
+        _isConnecting = false;
+
+        _updateNotification(
+          'Agent offline',
+          'No internet connection — will reconnect automatically',
+        );
+      }
+    });
+  }
+
+  /// Returns true if the device currently has a network connection.
+  Future<bool> _checkConnectivity() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      _isOnline = results.any((r) => r != ConnectivityResult.none);
+      return _isOnline;
+    } catch (e) {
+      _log.w('[WS] Connectivity check failed (assuming online): $e');
+      _isOnline = true;
+      return true;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -122,7 +245,9 @@ class AgentWebSocketService {
   void _startHeartbeat(String systemId) {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
-      _sendHeartbeat(systemId);
+      if (_isOnline) {
+        _sendHeartbeat(systemId);
+      }
     });
     // Send one immediately so the hub shows online right away.
     _sendHeartbeat(systemId);
@@ -149,44 +274,58 @@ class AgentWebSocketService {
   // ---------------------------------------------------------------------------
 
   Future<void> _connectToSystem(String systemId) async {
-    String host = (await _secureStorage.read(key: _kReverbHost))
-        .fold((_) => 'localhost', (v) => v ?? 'localhost');
-    final portStr = (await _secureStorage.read(key: _kReverbPort))
-        .fold((_) => '8080', (v) => v ?? '8080');
-    final appKey = (await _secureStorage.read(key: _kReverbAppKey))
-        .fold((_) => '', (v) => v ?? '');
+    // Guard against overlapping connection attempts.
+    if (_isConnecting) {
+      _log.d('[WS] Connection already in progress — skipping');
+      return;
+    }
 
-    String scheme = 'ws';
-    final system = _registry.findBySystemId(systemId);
-    if (system != null) {
-      final parsedBaseUri = Uri.tryParse(system.baseUrl);
-      if (parsedBaseUri != null) {
-        if (parsedBaseUri.scheme == 'https') {
-          scheme = 'wss';
-        }
-        if (host == 'localhost' || host == '127.0.0.1') {
-          final parentHost = parsedBaseUri.host;
-          if (parentHost.isNotEmpty) {
-            _log.i('[WS] Overriding loopback reverb_host "$host" with parent server host "$parentHost"');
-            host = parentHost;
+    // Don't attempt connection if offline.
+    if (!_isOnline) {
+      _log.d('[WS] Device is offline — skipping connection attempt');
+      return;
+    }
+
+    _isConnecting = true;
+
+    try {
+      String host = (await _secureStorage.read(key: _kReverbHost))
+          .fold((_) => 'localhost', (v) => v ?? 'localhost');
+      final portStr = (await _secureStorage.read(key: _kReverbPort))
+          .fold((_) => '8080', (v) => v ?? '8080');
+      final appKey = (await _secureStorage.read(key: _kReverbAppKey))
+          .fold((_) => '', (v) => v ?? '');
+
+      String scheme = 'ws';
+      final system = _registry.findBySystemId(systemId);
+      if (system != null) {
+        final parsedBaseUri = Uri.tryParse(system.baseUrl);
+        if (parsedBaseUri != null) {
+          if (parsedBaseUri.scheme == 'https') {
+            scheme = 'wss';
+          }
+          if (host == 'localhost' || host == '127.0.0.1') {
+            final parentHost = parsedBaseUri.host;
+            if (parentHost.isNotEmpty) {
+              _log.i('[WS] Overriding loopback reverb_host "$host" with parent server host "$parentHost"');
+              host = parentHost;
+            }
           }
         }
       }
-    }
 
-    if (host == 'localhost' || host == '127.0.0.1') {
-      _log.i('[WS] Host is still loopback — falling back to 10.0.2.2 for Android emulator compatibility.');
-      host = '10.0.2.2';
-    }
+      if (host == 'localhost' || host == '127.0.0.1') {
+        _log.i('[WS] Host is still loopback — falling back to 10.0.2.2 for Android emulator compatibility.');
+        host = '10.0.2.2';
+      }
 
-    final wsUri = Uri.parse(
-      '$scheme://$host:$portStr/app/$appKey'
-      '?protocol=$_pusherProtocol&client=flutter-agent&version=1.0',
-    );
+      final wsUri = Uri.parse(
+        '$scheme://$host:$portStr/app/$appKey'
+        '?protocol=$_pusherProtocol&client=flutter-agent&version=1.0',
+      );
 
-    _log.i('[WS] Connecting to $wsUri');
+      _log.i('[WS] Connecting to $wsUri');
 
-    try {
       // Cancel any stale listener from the previous connection before creating
       // a new channel. Without this, the old stream's onDone fires when the
       // old channel eventually closes and triggers a second reconnect loop.
@@ -202,24 +341,19 @@ class AgentWebSocketService {
         (raw) => _handleRawMessage(systemId, raw as String),
         onDone: () {
           _log.w('[WS] Connection closed by server');
+          _isConnecting = false;
           _scheduleReconnect(systemId);
         },
         onError: (e) {
           _log.e('[WS] Stream error: $e');
-          _updateNotification(
-            'Agent disconnected',
-            'Connection lost — retrying…',
-          );
+          _isConnecting = false;
           _scheduleReconnect(systemId);
         },
         cancelOnError: true,
       );
     } catch (e) {
       _log.e('[WS] Connection failed: $e');
-      _updateNotification(
-        'Agent disconnected',
-        'Could not connect to server — retrying…',
-      );
+      _isConnecting = false;
       _scheduleReconnect(systemId);
     }
   }
@@ -244,6 +378,8 @@ class AgentWebSocketService {
         case 'pusher_internal:subscription_succeeded':
           _log.i('[WS] Subscribed to private-agent.$systemId');
           _reconnectDelaySecs = 2; // reset back-off on confirmed subscription
+          _consecutiveAuthFailures = 0; // reset auth failure counter
+          _isConnecting = false; // connection fully established
           _updateNotification(
             'Super Admin Agent',
             'Agent is running — listening for commands',
@@ -251,6 +387,7 @@ class AgentWebSocketService {
           _startHeartbeat(systemId);
         case 'pusher_internal:subscription_error':
           _log.e('[WS] Subscription error — scheduling reconnect');
+          _isConnecting = false;
           _updateNotification(
             'Channel auth rejected',
             'Server rejected the channel subscription — reconnecting…',
@@ -279,6 +416,33 @@ class AgentWebSocketService {
   Future<void> _subscribeToPrivateChannel(String systemId) async {
     if (_socketId == null) return;
 
+    // Lazy key-loading fallback: if the signing key wasn't loaded at startup
+    // (e.g. SecureStorage was slow or failed), attempt to load it now before
+    // the first authenticated request. Without this, publicKeyId is empty
+    // and the server returns 401 "Unknown agent".
+    final signingService = getIt<SigningService>();
+    if (signingService.publicKeyId.isEmpty) {
+      _log.w('[WS] publicKeyId is empty — attempting lazy key load');
+      try {
+        await signingService.loadExistingKeyPair();
+      } catch (e) {
+        _log.e('[WS] Lazy key load failed: $e');
+      }
+    }
+
+    // If publicKeyId is still empty after the lazy load, don't bother sending
+    // the auth request — it will always fail with 401.
+    if (signingService.publicKeyId.isEmpty) {
+      _log.e('[WS] Cannot authenticate — no signing key available. '
+          'The agent may not be properly paired.');
+      _isConnecting = false;
+      _updateNotification(
+        'Authentication error',
+        'No signing key — please re-pair the device',
+      );
+      return; // Do NOT schedule reconnect — this is a permanent failure.
+    }
+
     final channelName = 'private-agent.$systemId';
 
     try {
@@ -295,14 +459,35 @@ class AgentWebSocketService {
           'channel': channelName,
         },
       });
+
+      // Auth succeeded — reset the failure counter.
+      _consecutiveAuthFailures = 0;
     } catch (e) {
-      // Network error or server rejection — don't wait 30 s for Reverb's
-      // activity_timeout to close the socket. Reconnect immediately so the
-      // user sees the "Reconnecting" notification without a long freeze.
-      _log.e('[WS] Channel auth failed: $e');
+      _isConnecting = false;
+
+      // Detect persistent auth failures (401) vs transient network errors.
+      final is401 = e.toString().contains('status code of 401');
+      if (is401) {
+        _consecutiveAuthFailures++;
+        _log.e('[WS] Channel auth rejected (401) — '
+            'attempt $_consecutiveAuthFailures/$_maxConsecutiveAuthFailures');
+
+        if (_consecutiveAuthFailures >= _maxConsecutiveAuthFailures) {
+          _log.e('[WS] Persistent auth failure — stopping reconnection. '
+              'The agent\'s key may have been revoked on the server.');
+          _updateNotification(
+            'Authentication failed',
+            'Server rejected agent credentials — please re-pair the device',
+          );
+          return; // Stop reconnecting — this won't fix itself.
+        }
+      } else {
+        _log.e('[WS] Channel auth failed (network): $e');
+      }
+
       _updateNotification(
         'Connection error',
-        'Could not reach server — reconnecting…',
+        'Could not authenticate — reconnecting…',
       );
       _scheduleReconnect(systemId);
     }
@@ -364,6 +549,20 @@ class AgentWebSocketService {
   }
 
   void _scheduleReconnect(String systemId) {
+    // If the device is offline, don't schedule any reconnection timer.
+    // The connectivity listener will trigger reconnection when the device
+    // comes back online. This prevents freeze loops.
+    if (!_isOnline) {
+      _log.i('[WS] Device is offline — skipping reconnect timer');
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = null;
+      _updateNotification(
+        'Agent offline',
+        'No internet connection — will reconnect automatically',
+      );
+      return;
+    }
+
     _log.w('[WS] Scheduling reconnect in ${_reconnectDelaySecs}s');
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
@@ -371,12 +570,24 @@ class AgentWebSocketService {
 
     _updateNotification(
       'Agent disconnected',
-      'No internet connection — retrying in ${_reconnectDelaySecs}s…',
+      'Reconnecting in ${_reconnectDelaySecs}s…',
     );
 
-    _reconnectTimer = Timer(Duration(seconds: _reconnectDelaySecs), () {
+    _reconnectTimer = Timer(Duration(seconds: _reconnectDelaySecs), () async {
       _reconnectDelaySecs =
           (_reconnectDelaySecs * 2).clamp(2, _maxReconnectDelaySecs);
+
+      // Re-check connectivity right before the attempt to avoid wasted work.
+      final hasInternet = await _checkConnectivity();
+      if (!hasInternet) {
+        _log.i('[WS] Still offline at reconnect time — waiting for connectivity');
+        _updateNotification(
+          'Agent offline',
+          'No internet connection — will reconnect automatically',
+        );
+        return;
+      }
+
       _updateNotification(
         'Agent reconnecting',
         'Attempting to reach the server…',
@@ -469,6 +680,18 @@ class AgentForegroundService {
     // 1. Initialise dependencies in this background isolate's heap context
     await SqliteAuditLogService.init();
     await setupDependencies();
+
+    // Load the signing key pair into the background isolate's SigningService.
+    // This MUST happen before any authenticated HTTP call (broadcasting/auth,
+    // heartbeat) — the signing interceptor reads publicKeyId from the cached
+    // field, which is empty until loadExistingKeyPair() populates it.
+    // Without this, X-Agent-Public-Key-Id is sent as empty → server 401.
+    try {
+      await getIt<SigningService>().loadExistingKeyPair();
+    } catch (_) {
+      // Non-fatal — the key will be loaded on the first sign() call.
+    }
+
     await getIt<PairedSystemRegistry>().reload();
 
     // 2. Register all capability WebSocket handlers inside this isolate

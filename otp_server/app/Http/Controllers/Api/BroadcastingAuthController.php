@@ -8,6 +8,7 @@ use App\Services\CanonicalJsonService;
 use App\Services\SignatureVerifierService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * POST /api/v1/broadcasting/auth
@@ -43,11 +44,23 @@ class BroadcastingAuthController extends Controller
 
         $publicKeyId = $request->header('X-Agent-Public-Key-Id');
         if (!$publicKeyId) {
+            Log::warning('[BroadcastAuth] Rejected: missing X-Agent-Public-Key-Id header', [
+                'socket_id'    => $data['socket_id'],
+                'channel_name' => $data['channel_name'],
+                'all_headers'  => collect($request->headers->all())
+                    ->only(['x-agent-id', 'x-agent-public-key-id', 'x-agent-nonce', 'x-agent-timestamp'])
+                    ->toArray(),
+            ]);
             return response()->json(['error' => 'Missing X-Agent-Public-Key-Id header.'], 401);
         }
 
         $agent = Agent::where('public_key_id', $publicKeyId)->first();
         if (!$agent) {
+            Log::warning('[BroadcastAuth] Rejected: unknown public_key_id', [
+                'received_key_id' => $publicKeyId,
+                'channel_name'    => $data['channel_name'],
+                'known_agents'    => Agent::pluck('public_key_id')->toArray(),
+            ]);
             return response()->json(['error' => 'Unknown agent.'], 401);
         }
 
