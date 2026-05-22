@@ -55,6 +55,20 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// ── Hub live-status polling (no auth — read-only, rate-limited by page load) ──
+Route::get('/agent-status', function () {
+    $agent = \App\Models\Agent::first();
+    if (!$agent) {
+        return response()->json(['paired' => false, 'online' => false, 'last_seen_at' => null, 'last_seen_human' => 'No agent paired']);
+    }
+    return response()->json([
+        'paired'          => true,
+        'online'          => $agent->isOnline(),
+        'last_seen_at'    => $agent->last_seen_at?->toIso8601String(),
+        'last_seen_human' => $agent->last_seen_at ? $agent->last_seen_at->diffForHumans() : 'Never — no heartbeat received yet',
+    ]);
+});
+
 Route::prefix('v1')->group(function (): void {
 
     // ── Agent routes (no auth middleware — ECDSA signatures protect these) ──

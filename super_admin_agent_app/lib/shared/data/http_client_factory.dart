@@ -46,6 +46,11 @@ class HttpClientFactory {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
+        // Hard timeouts so every call fails fast on network loss instead of
+        // hanging indefinitely and freezing the async chain.
+        connectTimeout: const Duration(seconds: 10),
+        sendTimeout:    const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
       ),
     );
 

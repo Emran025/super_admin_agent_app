@@ -74,16 +74,22 @@ class PairingController extends Controller
         );
 
         $reverbHost = config('otp_server.reverb_host');
-        if (empty($reverbHost) || $reverbHost === 'localhost' || $reverbHost === '127.0.0.1') {
+        // If Reverb is bound to 0.0.0.0 or loopback, derive the public host
+        // from the incoming request so the phone can reach the server.
+        if (empty($reverbHost) || in_array($reverbHost, ['localhost', '127.0.0.1', '0.0.0.0'])) {
             $reverbHost = $request->getHost();
         }
 
-        $reverbPort = (int) config('otp_server.reverb_port', 8080);
-        $reverbScheme = config('otp_server.reverb_scheme', env('REVERB_SCHEME', 'http'));
-        if ($request->secure() || $reverbScheme === 'https') {
-            if (empty(env('REVERB_PORT')) || $reverbPort === 8080) {
-                $reverbPort = 443;
-            }
+        // Use the explicitly configured REVERB_PORT. Only fall back to 443
+        // when the env var is not set at all — never silently override an
+        // explicit port value (e.g. 8080) just because the request is HTTPS.
+        $reverbPort   = (int) (env('REVERB_PORT') ?: 8080);
+        $reverbScheme = config('otp_server.reverb_scheme', 'http');
+
+        // If the scheme is explicitly https (production TLS proxy), publish
+        // 443 only when no explicit port has been configured.
+        if ($reverbScheme === 'https' && empty(env('REVERB_PORT'))) {
+            $reverbPort = 443;
         }
 
         return response()->json([

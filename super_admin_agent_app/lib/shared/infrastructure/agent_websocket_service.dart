@@ -200,18 +200,26 @@ class AgentWebSocketService {
 
       _subscription = _channel!.stream.listen(
         (raw) => _handleRawMessage(systemId, raw as String),
-        onDone: () => _scheduleReconnect(systemId),
+        onDone: () {
+          _log.w('[WS] Connection closed by server');
+          _scheduleReconnect(systemId);
+        },
         onError: (e) {
           _log.e('[WS] Stream error: $e');
+          _updateNotification(
+            'Agent disconnected',
+            'Connection lost — retrying…',
+          );
           _scheduleReconnect(systemId);
         },
         cancelOnError: true,
       );
-
-      // Reset back-off on successful connection.
-      _reconnectDelaySecs = 2;
     } catch (e) {
       _log.e('[WS] Connection failed: $e');
+      _updateNotification(
+        'Agent disconnected',
+        'Could not connect to server — retrying…',
+      );
       _scheduleReconnect(systemId);
     }
   }
@@ -235,9 +243,18 @@ class AgentWebSocketService {
           _send({'event': 'pusher:pong', 'data': {}});
         case 'pusher_internal:subscription_succeeded':
           _log.i('[WS] Subscribed to private-agent.$systemId');
+          _reconnectDelaySecs = 2; // reset back-off on confirmed subscription
+          _updateNotification(
+            'Super Admin Agent',
+            'Agent is running — listening for commands',
+          );
           _startHeartbeat(systemId);
         case 'pusher_internal:subscription_error':
           _log.e('[WS] Subscription error — scheduling reconnect');
+          _updateNotification(
+            'Channel auth rejected',
+            'Server rejected the channel subscription — reconnecting…',
+          );
           _scheduleReconnect(systemId);
         case 'App\\Events\\AgentCommandDispatched':
         case 'agent.command':
@@ -279,7 +296,15 @@ class AgentWebSocketService {
         },
       });
     } catch (e) {
+      // Network error or server rejection — don't wait 30 s for Reverb's
+      // activity_timeout to close the socket. Reconnect immediately so the
+      // user sees the "Reconnecting" notification without a long freeze.
       _log.e('[WS] Channel auth failed: $e');
+      _updateNotification(
+        'Connection error',
+        'Could not reach server — reconnecting…',
+      );
+      _scheduleReconnect(systemId);
     }
   }
 
@@ -343,11 +368,41 @@ class AgentWebSocketService {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _reconnectTimer?.cancel();
+
+    _updateNotification(
+      'Agent disconnected',
+      'No internet connection — retrying in ${_reconnectDelaySecs}s…',
+    );
+
     _reconnectTimer = Timer(Duration(seconds: _reconnectDelaySecs), () {
       _reconnectDelaySecs =
           (_reconnectDelaySecs * 2).clamp(2, _maxReconnectDelaySecs);
+      _updateNotification(
+        'Agent reconnecting',
+        'Attempting to reach the server…',
+      );
       _connectToSystem(systemId);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Foreground notification updates
+  // ---------------------------------------------------------------------------
+
+  /// Updates the persistent foreground-service notification so the user always
+  /// sees the current connection state without opening the app.
+  ///
+  /// Works only when the background service is active; silently ignored
+  /// in the main UI isolate (where [AgentForegroundService.instance] is null).
+  void _updateNotification(String title, String content) {
+    try {
+      final svc = AgentForegroundService.instance;
+      if (svc is AndroidServiceInstance) {
+        svc.setForegroundNotificationInfo(title: title, content: content);
+      }
+    } catch (_) {
+      // Non-fatal — notification update is best-effort.
+    }
   }
 }
 
