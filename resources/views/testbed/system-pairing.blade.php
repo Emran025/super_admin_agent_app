@@ -407,7 +407,9 @@
             </div>
 
             <div class="qr-block">
-                <div id="qrcode" data-capabilities='@json($newSystem->capabilities)'></div>
+                <div style="background: #ffffff; padding: 1.25rem; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin: 0.5rem 0;" data-darkreader-ignore>
+                    <div id="qrcode" data-capabilities='@json($newSystem->capabilities)' style="color-scheme: light;"></div>
+                </div>
                 <div class="qr-note">Scan with the mobile agent to link this external system.</div>
             </div>
         </div>

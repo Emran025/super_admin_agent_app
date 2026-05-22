@@ -321,8 +321,8 @@
                     Scan this QR code with the **Super Admin Agent** app to link it to this server.
                     Once paired, the agent will dynamically receive SMS OTP requests, 2FA push requests, and telemetry commands.
                 </p>
-                <div style="background: #ffffff; padding: 1.25rem; border-radius: 12px; margin: 1rem 0; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-                    <div id="agent-pairing-qrcode"></div>
+                <div style="background: #ffffff; padding: 1.25rem; border-radius: 12px; margin: 1rem 0; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" data-darkreader-ignore>
+                    <div id="agent-pairing-qrcode" style="color-scheme: light;"></div>
                 </div>
                 <p style="font-size: 0.75rem; color: #64748b;">
                     Token matches <code>OTP_PAIRING_TOKEN</code> in your environment config. Expires in 24 hours.
