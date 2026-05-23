@@ -63,7 +63,7 @@ void main() {
 
     test('loadSystems emits [Loading, Error] when it fails', () async {
       when(() => getUseCase.execute(gatewaySystemId: 'gate-1'))
-          .thenAnswer((_) async => const Left(RegistrationFailure('error')));
+          .thenAnswer((_) async => const Left(RegistrationFailure('')));
 
       final expected = [
         LinkedSystemsLoading(),
