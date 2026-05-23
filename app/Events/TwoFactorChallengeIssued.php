@@ -54,7 +54,8 @@ class TwoFactorChallengeIssued implements ShouldBroadcastNow
         return [
             'capability'          => 'two_fa',
             'command_id'          => $this->challengeId,
-            'system_id'           => $this->externalSystemId,
+            'system_id'           => $this->systemId,
+            'external_system_id'  => $this->externalSystemId,
             'challenged_username' => $this->challengedUsername,
             'issued_at'           => $this->issuedAt,
             'expires_at'          => $this->expiresAt,

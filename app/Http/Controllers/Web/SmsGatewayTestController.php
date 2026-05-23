@@ -94,7 +94,7 @@ class SmsGatewayTestController extends Controller
                 ->withErrors(['system' => 'Test system token is not in session or database. Please recreate the test system.']);
         }
 
-        $apiUrl  = url('/api/v1/external/otp');
+        $apiUrl  = route('api.v1.external.otp');
         $apiResp = Http::withToken($sessionToken)
             ->acceptJson()
             ->post($apiUrl, $envelope);

@@ -95,9 +95,11 @@ Route::prefix('v1')->group(function (): void {
         ->middleware('auth.external')
         ->group(function (): void {
             Route::post('/otp',   [OtpGatewayController::class, 'dispatch'])
-                 ->middleware('capability:otp');
+                 ->middleware('capability:otp')
+                 ->name('api.v1.external.otp');
 
             Route::post('/login', [LoginApprovalController::class, 'challenge'])
-                 ->middleware('capability:super_admin_login');
+                 ->middleware('capability:super_admin_login')
+                 ->name('api.v1.external.login');
         });
 });
