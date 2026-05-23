@@ -1,28 +1,31 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
+import 'package:logger/logger.dart';
 
-import '../../presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
-import '../../presentation/auth_2fa/widgets/challenge_approval_dialog.dart';
 import 'agent_websocket_service.dart';
 import 'ws_message_router.dart';
 
+final _log = Logger(printer: PrettyPrinter(methodCount: 0));
+
 /// WebSocket handler for the [two_fa] capability.
 ///
-/// Structurally identical to the former Auth2faFcmHandler.
-/// On receiving a command:
-/// 1. Creates a fresh [AuthChallengeCubit] from DI
-/// 2. Calls [loadChallenge] to fetch the challenge from the server
-/// 3. Pushes [ChallengeApprovalDialog] via the global navigator key
+/// Runs exclusively in the **background service isolate** — it has no access
+/// to the Flutter widget tree or any UI navigator. Its only job is to:
+///
+///   1. Forward the challenge identifiers to the **main isolate** via the
+///      background-service IPC channel so that main.dart can show the
+///      [ChallengeApprovalDialog].
+///   2. Update the persistent foreground notification so the user sees a
+///      "tap to approve" prompt even if the app is not in the foreground.
+///
+/// IPC direction note
+/// ──────────────────
+/// [FlutterBackgroundService().invoke()] sends events MAIN → BACKGROUND.
+/// To send BACKGROUND → MAIN (what we need here), call
+/// [ServiceInstance.invoke()] — i.e. [AgentForegroundService.instance?.invoke()].
+/// The main isolate then receives the event via
+/// [FlutterBackgroundService().on('show_challenge').listen(...)].
 class Auth2faWsHandler implements CapabilityCommandHandler {
-  final GetIt _getIt;
-  final GlobalKey<NavigatorState> navigatorKey;
-
-  Auth2faWsHandler({
-    required this.navigatorKey,
-    GetIt? getIt,
-  }) : _getIt = getIt ?? GetIt.instance;
+  const Auth2faWsHandler();
 
   @override
   Future<void> handle({
@@ -30,39 +33,28 @@ class Auth2faWsHandler implements CapabilityCommandHandler {
     required String systemId,
     Map<String, dynamic>? payload,
   }) async {
-    // 1. Notify the main isolate (if running) to display the challenge dialog
-    FlutterBackgroundService().invoke('show_challenge', {
+    _log.i('[Auth2faWsHandler] challenge received — commandId=$commandId systemId=$systemId');
+
+    // 1. Send the challenge to the main isolate so it can show the approval dialog.
+    //    ServiceInstance.invoke() is the background→main direction.
+    final service = AgentForegroundService.instance;
+    if (service == null) {
+      _log.e('[Auth2faWsHandler] AgentForegroundService.instance is null — cannot dispatch show_challenge IPC');
+      return;
+    }
+
+    service.invoke('show_challenge', {
       'commandId': commandId,
       'systemId': systemId,
     });
+    _log.i('[Auth2faWsHandler] show_challenge IPC dispatched to main isolate');
 
-    // 2. Update the background/foreground service notification with details of the pending 2FA request
-    final service = AgentForegroundService.instance;
+    // 2. Update the persistent foreground notification to prompt the user.
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
-        title: 'Super Admin Agent - Action Required',
-        content: 'Pending 2FA Approval: tap to approve or deny',
+        title: 'Super Admin Agent — Action Required',
+        content: 'Pending 2FA approval: open the app to approve or deny',
       );
     }
-
-    final cubit = _getIt<AuthChallengeCubit>();
-
-    await cubit.loadChallenge(
-      challengeId: commandId,
-      systemId: systemId,
-    );
-
-    final navigatorState = navigatorKey.currentState;
-    if (navigatorState == null) return;
-
-    await navigatorState.push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => BlocProvider.value(
-          value: cubit,
-          child: const ChallengeApprovalDialog(),
-        ),
-      ),
-    );
   }
 }

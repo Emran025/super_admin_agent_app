@@ -40,11 +40,14 @@ class PushTwoFactorTestController extends Controller
 
     public function showLoginForm(): View
     {
-        $agent = \App\Models\Agent::where('capabilities', 'like', '%two_fa%')->first()
-            ?? \App\Models\Agent::first();
+        $agent = \App\Models\Agent::where('capabilities', 'like', '%two_fa%')
+            ->orderBy('last_seen_at', 'desc')
+            ->first()
+            ?? \App\Models\Agent::orderBy('last_seen_at', 'desc')->first();
         $isAgentConnected = $agent ? $agent->isOnline() : false;
+        $agentSystemId    = $agent?->system_id;
 
-        return view('testbed.push.login', compact('isAgentConnected'));
+        return view('testbed.push.login', compact('isAgentConnected', 'agentSystemId'));
     }
 
     // -------------------------------------------------------------------------
@@ -102,8 +105,15 @@ class PushTwoFactorTestController extends Controller
             ]);
         }
 
-        $challengeId = $apiResp->json('challenge_id');
+        $challengeId    = $apiResp->json('challenge_id');
+        $agentSystemId  = $apiResp->json('agent_system_id');
+        $broadcastOk    = $apiResp->json('broadcast_ok');
+        $broadcastError = $apiResp->json('broadcast_error');
+
         $request->session()->put('push_challenge_id', $challengeId);
+        $request->session()->put('push_agent_system_id', $agentSystemId);
+        $request->session()->put('push_broadcast_ok', $broadcastOk);
+        $request->session()->put('push_broadcast_error', $broadcastError);
 
         return redirect()->route('testbed.push.waiting');
     }
@@ -150,12 +160,15 @@ class PushTwoFactorTestController extends Controller
         $reverbPort   = $request->secure() ? 443 : (int) config('otp_server.reverb_port', 8080);
 
         return view('testbed.push.waiting', [
-            'challengeId'  => $challengeId,
-            'expiresAt'    => $challenge->expires_at->toIso8601String(),
-            'reverbScheme' => $reverbScheme,
-            'reverbHost'   => $reverbHost,
-            'reverbPort'   => $reverbPort,
-            'reverbAppKey' => config('otp_server.reverb_app_key', ''),
+            'challengeId'    => $challengeId,
+            'expiresAt'      => $challenge->expires_at->toIso8601String(),
+            'reverbScheme'   => $reverbScheme,
+            'reverbHost'     => $reverbHost,
+            'reverbPort'     => $reverbPort,
+            'reverbAppKey'   => config('otp_server.reverb_app_key', ''),
+            'agentSystemId'  => $request->session()->get('push_agent_system_id'),
+            'broadcastOk'    => $request->session()->get('push_broadcast_ok'),
+            'broadcastError' => $request->session()->get('push_broadcast_error'),
         ]);
     }
 

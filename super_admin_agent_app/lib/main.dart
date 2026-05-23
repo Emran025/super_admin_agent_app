@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:logger/logger.dart';
 
 import 'di/app_module.dart';
 import 'presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
@@ -14,6 +15,12 @@ import 'presentation/shared/theme/app_theme.dart';
 import 'shared/domain/paired_system_registry.dart';
 import 'shared/infrastructure/agent_websocket_service.dart';
 import 'shared/infrastructure/permission_handler_service.dart';
+
+// ---------------------------------------------------------------------------
+// Module-level logger (main isolate)
+// ---------------------------------------------------------------------------
+
+final _log = Logger(printer: PrettyPrinter(methodCount: 0));
 
 // ---------------------------------------------------------------------------
 // Global navigator key
@@ -44,12 +51,17 @@ Future<void> main() async {
 
   // 4. Listen for 2FA challenge approval requests from the background service isolate.
   FlutterBackgroundService().on('show_challenge').listen((event) {
+    _log.i('[main] show_challenge IPC received — event=$event');
     if (event != null) {
       final commandId = event['commandId'] as String?;
       final systemId = event['systemId'] as String?;
       if (commandId != null && systemId != null) {
         _show2FaDialog(commandId, systemId);
+      } else {
+        _log.w('[main] show_challenge: missing commandId or systemId in payload');
       }
+    } else {
+      _log.w('[main] show_challenge: received null event');
     }
   });
 

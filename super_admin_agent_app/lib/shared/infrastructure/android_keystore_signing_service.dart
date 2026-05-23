@@ -140,6 +140,16 @@ class AndroidKeystoreSigningService implements SigningService {
   @override
   Future<Either<SigningFailure, String>> sign(String canonicalInput) async {
     try {
+      // Lazily populate _cachedKeyId if it was not loaded at startup.
+      // loadExistingKeyPair() is intentionally not awaited during app startup
+      // (to avoid blocking on slow SecureStorage reads on low-end devices).
+      // The interceptor reads publicKeyId *after* sign() returns, so loading
+      // it here — on the first sign() call — ensures it is always available
+      // before the header is set on the outgoing request.
+      if (_cachedKeyId == null) {
+        await _loadCachedPublicKey();
+      }
+
       // Read private key from secure storage.
       final readResult = await _secureStorage.read(key: _privateKeyStorageKey);
       final privateKeyBase64 = readResult.fold(

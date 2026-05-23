@@ -46,11 +46,11 @@ class HttpClientFactory {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        // Hard timeouts so every call fails fast on network loss instead of
-        // hanging indefinitely and freezing the async chain.
-        connectTimeout: const Duration(seconds: 10),
-        sendTimeout:    const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 15),
+        // Increased timeouts to 30s to better support slow mobile networks
+        // (3G/Edge) where TLS handshakes can take longer than 10s.
+        connectTimeout: const Duration(seconds: 30),
+        sendTimeout:    const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
       ),
     );
 

@@ -258,8 +258,22 @@ class PairingController extends Controller
         $timestamp = $request->header('X-Agent-Timestamp', '');
         $signature = $request->header('X-Agent-Signature', '');
 
-        // GET request -> canonical body is empty string
-        $signingInput = "" . "\n" . $nonce . "\n" . $timestamp;
+        // Validate that all signing headers are present and non-empty.
+        // An empty nonce or timestamp produces the wrong signing input length
+        // and will always fail verification — catch this early with a clear error.
+        if (empty($nonce) || empty($timestamp) || empty($signature)) {
+            return response()->json(['error' => 'Missing required signing headers (nonce, timestamp, or signature).'], 400);
+        }
+
+        // GET request — canonical body is empty string "".
+        // Signing input: "" + "\n" + nonce + "\n" + timestamp
+        // Expected string length: 2 + strlen(nonce) + strlen(timestamp)
+        $signingInput = "\n" . $nonce . "\n" . $timestamp;
+
+        $expectedLength = 2 + strlen($nonce) + strlen($timestamp);
+        if (strlen($signingInput) !== $expectedLength) {
+            return response()->json(['error' => 'Signing input length mismatch. Expected ' . $expectedLength . ', got ' . strlen($signingInput) . '.'], 400);
+        }
 
         $isValid = $this->verifier->verify(
             signingInput:       $signingInput,
@@ -289,11 +303,30 @@ class PairingController extends Controller
             return [
                 'id'           => $sys->id,
                 'name'         => $sys->name,
-                'capabilities' => $sys->capabilities,
-                'is_test'      => $sys->is_test,
+                'capabilities' => $sys->capabilities ?? [],
+                'is_test'      => (bool) $sys->is_test,
             ];
         });
 
-        return response()->json(['systems' => $systems]);
+        // Include any pending 2FA challenges so the agent can discover them
+        // via polling even when the Reverb WebSocket event is not received.
+        $pendingChallenges = \App\Models\TwoFactorChallenge::where('agent_id', $agent->agent_id)
+            ->where('status', 'pending')
+            ->where('expires_at', '>', now())
+            ->get()
+            ->map(function ($ch) {
+                return [
+                    'challenge_id'        => (string) $ch->id,
+                    'system_id'           => (string) ($ch->external_system_id ?? $ch->system_id),
+                    'challenged_username' => $ch->challenged_username,
+                    'issued_at'           => $ch->created_at->toIso8601String(),
+                    'expires_at'          => $ch->expires_at->toIso8601String(),
+                ];
+            });
+
+        return response()->json([
+            'systems'            => $systems->values(),
+            'pending_challenges' => $pendingChallenges->values(),
+        ]);
     }
 }

@@ -259,6 +259,41 @@
         <a href="{{ route('testbed.push.login') }}" id="retry-btn">Try Again &rarr;</a>
 
         <div class="ws-status" id="ws-status">WebSocket: connecting&hellip;</div>
+
+        {{-- ── Broadcast diagnosis panel ───────────────────────────────── --}}
+        <details style="margin-top:1.5rem;text-align:left;font-size:.78rem;color:#94a3b8;">
+            <summary style="cursor:pointer;color:#cbd5e1;font-weight:600;list-style:none;user-select:none;">
+                ▶ Broadcast diagnostics
+            </summary>
+            <div style="margin-top:.6rem;background:#0f172a;border-radius:8px;padding:.75rem 1rem;line-height:1.7;word-break:break-all;">
+                <div>
+                    <span style="color:#64748b;">Broadcast sent:</span>
+                    @if($broadcastOk === true)
+                        <span style="color:#22c55e;font-weight:600;">✓ YES</span>
+                    @elseif($broadcastOk === false && $broadcastError)
+                        <span style="color:#f87171;font-weight:600;">✗ FAILED — {{ $broadcastError }}</span>
+                    @else
+                        <span style="color:#94a3b8;">unknown</span>
+                    @endif
+                </div>
+                <div style="margin-top:.4rem;">
+                    <span style="color:#64748b;">Agent system_id targeted:</span><br>
+                    <code style="color:#38bdf8;">{{ $agentSystemId ?? '(none)' }}</code>
+                </div>
+                <div style="margin-top:.4rem;">
+                    <span style="color:#64748b;">Reverb channel:</span><br>
+                    <code style="color:#38bdf8;">private-agent.{{ $agentSystemId ?? '?' }}</code>
+                </div>
+                <div style="margin-top:.4rem;color:#475569;font-size:.72rem;">
+                    If the agent system_id above does not match the system_id your phone
+                    subscribed with (<code>private-agent.04d2bf2d-…</code>), the challenge
+                    was broadcast to the wrong channel. Check that only one agent record
+                    exists in the database, or link the external system to the correct agent
+                    on the System Pairing page.
+                </div>
+            </div>
+        </details>
+        {{-- ──────────────────────────────────────────────────────────────── --}}
     </div>
 
     <script>
@@ -371,9 +406,25 @@
 
             const channelName = `push-2fa-result.${CHALLENGE_ID}`;
 
+            // If the Pusher handshake (pusher:connection_established) does not arrive
+            // within 6 seconds of the socket opening, the socket is connected to the
+            // web server rather than Reverb (no WebSocket proxy configured). Close it
+            // and start the polling fallback so the decision is still delivered.
+            let handshakeTimer = null;
+            let handshakeReceived = false;
+
             socket.addEventListener('open', () => {
                 wsStatus.textContent = 'WebSocket: connected';
                 wsStatus.className = 'ws-status connected';
+
+                handshakeTimer = setTimeout(() => {
+                    if (!handshakeReceived) {
+                        wsStatus.textContent = 'WebSocket: no Pusher handshake — falling back to polling';
+                        wsStatus.className = 'ws-status error';
+                        socket.close();
+                        startPolling();
+                    }
+                }, 6000);
             });
 
             socket.addEventListener('message', (event) => {
@@ -388,7 +439,9 @@
 
                 // Pusher handshake
                 if (evtName === 'pusher:connection_established') {
-                    statusLabel.textContent = 'Live channel established — waiting for agent&hellip;';
+                    handshakeReceived = true;
+                    clearTimeout(handshakeTimer);
+                    statusLabel.textContent = 'Live channel established — waiting for agent\u2026';
                     // Subscribe to the public channel
                     socket.send(JSON.stringify({
                         event: 'pusher:subscribe',

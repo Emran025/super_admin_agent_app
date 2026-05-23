@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:logger/logger.dart';
 import 'package:super_admin_agent/shared/domain/signing_service.dart';
@@ -265,7 +264,12 @@ class AgentWebSocketService {
       );
       _log.d('[WS] Heartbeat sent for system $systemId');
     } catch (e) {
-      _log.w('[WS] Heartbeat failed (non-fatal): $e');
+      if (e.toString().contains('timeout')) {
+        // Downgrade timeout logs to debug to avoid console flooding on poor networks
+        _log.d('[WS] Heartbeat timeout (non-fatal, device likely offline)');
+      } else {
+        _log.w('[WS] Heartbeat failed (non-fatal): $e');
+      }
     }
   }
 
@@ -698,7 +702,7 @@ class AgentForegroundService {
     final router = getIt<WsMessageRouter>();
     router.registerHandler(
       CapabilityId.twoFa,
-      Auth2faWsHandler(navigatorKey: GlobalKey<NavigatorState>()),
+      const Auth2faWsHandler(),
     );
     router.registerHandler(
       CapabilityId.otpGateway,
@@ -735,6 +739,18 @@ class AgentForegroundService {
     service.on('stop').listen((_) {
       websocketService.disconnect();
       service.stopSelf();
+    });
+
+    // Restore the default "Agent is running" notification after a 2FA
+    // approval dialog is dismissed. The dialog sends this event on dispose()
+    // via FlutterBackgroundService().invoke('restore_notification') (main→bg).
+    service.on('restore_notification').listen((_) {
+      if (service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: 'Super Admin Agent',
+          content: 'Agent is running — listening for commands',
+        );
+      }
     });
   }
 

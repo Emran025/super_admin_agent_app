@@ -14,10 +14,14 @@ class LinkedSystem extends Equatable {
   });
 
   factory LinkedSystem.fromJson(Map<String, dynamic> json) {
+    final rawCaps = json['capabilities'];
+    final capabilities = rawCaps is List
+        ? List<String>.from(rawCaps.whereType<String>())
+        : <String>[];
     return LinkedSystem(
       id: json['id'] as String,
       name: json['name'] as String,
-      capabilities: List<String>.from(json['capabilities'] as List),
+      capabilities: capabilities,
       isTest: json['is_test'] as bool? ?? false,
     );
   }

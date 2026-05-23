@@ -328,13 +328,21 @@ class PairingRepositoryImpl implements PairingRepository {
       );
 
       final body = response.data;
-      if (body == null || body['systems'] == null) {
-        return const Left(RegistrationFailure('Failed to fetch linked systems'));
+      if (body == null) {
+        return const Left(RegistrationFailure('Empty response from server'));
       }
 
-      final list = body['systems'] as List;
-      final systems = list
-          .map((e) => LinkedSystem.fromJson(e as Map<String, dynamic>))
+      final rawSystems = body['systems'];
+      if (rawSystems == null) {
+        return const Left(RegistrationFailure('Server response missing "systems" field'));
+      }
+      if (rawSystems is! List) {
+        return const Left(RegistrationFailure('Server returned unexpected type for "systems" field'));
+      }
+
+      final systems = rawSystems
+          .whereType<Map<String, dynamic>>()
+          .map(LinkedSystem.fromJson)
           .toList();
       return Right(systems);
     } catch (e) {

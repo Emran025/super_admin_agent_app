@@ -49,10 +49,12 @@ class TwoFactorChallengeService
         ]);
 
         broadcast(new TwoFactorChallengeIssued(
-            systemId:          $agent->system_id,
-            challengeId:       (string) $challenge->id,
+            systemId:           $agent->system_id,
+            externalSystemId:   (string) ($challenge->external_system_id ?? $challenge->system_id),
+            challengeId:        (string) $challenge->id,
             challengedUsername: $challengedUsername,
-            issuedAt:          now()->toIso8601String(),
+            issuedAt:           now()->toIso8601String(),
+            expiresAt:          $challenge->expires_at->toIso8601String(),
         ));
 
         return $challenge;

@@ -55,7 +55,13 @@ class LinkedSystemsCubit extends Cubit<LinkedSystemsState> {
     final result = await _getUseCase.execute(gatewaySystemId: gatewaySystemId);
     if (isClosed) return;
     result.fold(
-      (failure) => emit(const LinkedSystemsError('Failed to load linked systems')),
+      (failure) {
+        String msg = 'Failed to load linked systems';
+        if (failure is RegistrationFailure && failure.reason.isNotEmpty) {
+          msg = failure.reason;
+        }
+        emit(LinkedSystemsError(msg));
+      },
       (systems) => emit(LinkedSystemsLoaded(systems)),
     );
   }
