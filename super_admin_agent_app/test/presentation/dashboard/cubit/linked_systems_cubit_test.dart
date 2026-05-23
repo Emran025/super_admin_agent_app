@@ -9,8 +9,11 @@ import 'package:super_admin_agent/domain/pairing/use_cases/link_system_use_case.
 import 'package:super_admin_agent/domain/pairing/use_cases/unlink_system_use_case.dart';
 import 'package:super_admin_agent/presentation/dashboard/cubit/linked_systems_cubit.dart';
 
-class MockGetLinkedSystemsUseCase extends Mock implements GetLinkedSystemsUseCase {}
+class MockGetLinkedSystemsUseCase extends Mock
+    implements GetLinkedSystemsUseCase {}
+
 class MockLinkSystemUseCase extends Mock implements LinkSystemUseCase {}
+
 class MockUnlinkSystemUseCase extends Mock implements UnlinkSystemUseCase {}
 
 void main() {
@@ -63,7 +66,7 @@ void main() {
 
     test('loadSystems emits [Loading, Error] when it fails', () async {
       when(() => getUseCase.execute(gatewaySystemId: 'gate-1'))
-          .thenAnswer((_) async => const Left(RegistrationFailure('error')));
+          .thenAnswer((_) async => const Left(RegistrationFailure('')));
 
       final expected = [
         LinkedSystemsLoading(),
@@ -97,7 +100,8 @@ void main() {
       expect(result, isNull);
     });
 
-    test('unlinkSystem removes unlinked system from loaded state on success', () async {
+    test('unlinkSystem removes unlinked system from loaded state on success',
+        () async {
       when(() => unlinkUseCase.execute(
             gatewaySystemId: 'gate-1',
             systemId: 'sys-ext-1',
