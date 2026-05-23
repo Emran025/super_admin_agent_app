@@ -9,6 +9,7 @@ use App\Models\ExternalSystem;
 use App\Models\TwoFactorChallenge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * 2FA Login Approval — External API endpoint.
@@ -44,13 +45,19 @@ class LoginApprovalController extends Controller
         // Find the agent linked to this external system
         $agent = null;
         if ($system->agent_id) {
-            $agent = Agent::where('agent_id', $system->agent_id)->first();
+            $agent = Agent::where('agent_id', $system->agent_id)
+                ->orderBy('last_seen_at', 'desc')
+                ->first();
         }
 
-        // If not explicitly linked, fall back to the first agent with the two_fa capability.
-        // Never fall back to an arbitrary agent — that would route 2FA challenges to the wrong device.
+        // If not explicitly linked, fall back to the most-recently-seen agent with the
+        // two_fa capability.  Ordering by last_seen_at desc ensures that if there are
+        // multiple paired agents (e.g. old test pairings), the one that is actively
+        // connected to Reverb right now is selected.
         if ($agent === null) {
-            $agent = Agent::where('capabilities', 'like', '%two_fa%')->first();
+            $agent = Agent::where('capabilities', 'like', '%two_fa%')
+                ->orderBy('last_seen_at', 'desc')
+                ->first();
         }
 
         if ($agent === null) {
@@ -73,13 +80,39 @@ class LoginApprovalController extends Controller
             'sandbox_log'         => $system->is_test,
         ]);
 
-        broadcast(new TwoFactorChallengeIssued(
-            systemId:           $agent->system_id,
-            challengeId:        (string) $challenge->id,
-            challengedUsername: $username . ($contextLabel ? " ({$contextLabel})" : ''),
-            issuedAt:           now()->toIso8601String(),
-        ));
+        $broadcastOk    = false;
+        $broadcastError = null;
 
-        return response()->json(['challenge_id' => (string) $challenge->id], 202);
+        try {
+            broadcast(new TwoFactorChallengeIssued(
+                systemId:           $agent->system_id,
+                externalSystemId:   (string) $system->id,
+                challengeId:        (string) $challenge->id,
+                challengedUsername: $username . ($contextLabel ? " ({$contextLabel})" : ''),
+                issuedAt:           now()->toIso8601String(),
+                expiresAt:          $challenge->expires_at->toIso8601String(),
+            ));
+            $broadcastOk = true;
+            Log::info('2FA challenge broadcast OK', [
+                'challenge_id'     => (string) $challenge->id,
+                'agent_system_id'  => $agent->system_id,
+                'reverb_channel'   => 'private-agent.' . $agent->system_id,
+            ]);
+        } catch (\Throwable $e) {
+            $broadcastError = $e->getMessage();
+            Log::error('2FA challenge broadcast FAILED', [
+                'challenge_id'     => (string) $challenge->id,
+                'agent_system_id'  => $agent->system_id,
+                'reverb_channel'   => 'private-agent.' . $agent->system_id,
+                'error'            => $broadcastError,
+            ]);
+        }
+
+        return response()->json([
+            'challenge_id'    => (string) $challenge->id,
+            'agent_system_id' => $agent->system_id,
+            'broadcast_ok'    => $broadcastOk,
+            'broadcast_error' => $broadcastError,
+        ], 202);
     }
 }

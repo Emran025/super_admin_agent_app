@@ -31,6 +31,9 @@ use Illuminate\Support\Facades\Route;
 |   POST  /api/v1/otp-commands/{commandId}/report
 |     ↳ AgentReportController::report()
 |
+|   GET   /api/v1/push-challenges/{challengeId}
+|     ↳ PushChallengeController::show()
+|
 |   POST  /api/v1/push-challenges/{challengeId}/respond
 |     ↳ PushChallengeController::respond()
 |
@@ -76,6 +79,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/broadcasting/auth', [BroadcastingAuthController::class, 'auth']);
     Route::get('/otp-commands/{commandId}', [OtpCommandController::class, 'show']);
     Route::post('/otp-commands/{commandId}/report', [AgentReportController::class, 'report']);
+    Route::get('/push-challenges/{challengeId}', [PushChallengeController::class, 'show']);
     Route::post('/push-challenges/{challengeId}/respond', [PushChallengeController::class, 'respond']);
 
     // ── Agent heartbeat — keeps last_seen_at fresh while the WS stays alive ──
