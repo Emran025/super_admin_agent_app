@@ -55,8 +55,9 @@ Future<void> main() async {
     if (event != null) {
       final commandId = event['commandId'] as String?;
       final systemId = event['systemId'] as String?;
+      final externalSystemId = event['externalSystemId'] as String?;
       if (commandId != null && systemId != null) {
-        _show2FaDialog(commandId, systemId);
+        _show2FaDialog(commandId, systemId, externalSystemId);
       } else {
         _log.w('[main] show_challenge: missing commandId or systemId in payload');
       }
@@ -91,12 +92,16 @@ Future<void> main() async {
 }
 
 /// Dynamic dialog dispatcher for background-triggered 2FA authentication challenges.
-void _show2FaDialog(String commandId, String systemId) {
+void _show2FaDialog(String commandId, String systemId, String? externalSystemId) {
   final navigatorState = navigatorKey.currentState;
   if (navigatorState == null) return;
 
   final cubit = getIt<AuthChallengeCubit>();
-  cubit.loadChallenge(challengeId: commandId, systemId: systemId);
+  cubit.loadChallenge(
+    challengeId: commandId,
+    systemId: systemId,
+    externalSystemId: externalSystemId,
+  );
 
   navigatorState.push(
     MaterialPageRoute<void>(

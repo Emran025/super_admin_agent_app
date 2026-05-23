@@ -46,6 +46,7 @@ class Auth2faWsHandler implements CapabilityCommandHandler {
     service.invoke('show_challenge', {
       'commandId': commandId,
       'systemId': systemId,
+      'externalSystemId': payload?['external_system_id'] as String?,
     });
     _log.i('[Auth2faWsHandler] show_challenge IPC dispatched to main isolate');
 

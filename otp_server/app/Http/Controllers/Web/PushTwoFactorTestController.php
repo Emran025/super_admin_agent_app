@@ -94,7 +94,7 @@ class PushTwoFactorTestController extends Controller
         $plainKey = $system->getPlaintextEncryptionKey();
         $envelope = $this->encryptionService->encrypt($payload, $plainKey);
 
-        $apiUrl  = url('/api/v1/external/login');
+        $apiUrl  = route('api.v1.external.login');
         $apiResp = Http::withToken($sessionToken)
             ->acceptJson()
             ->post($apiUrl, $envelope);

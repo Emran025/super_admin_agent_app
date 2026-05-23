@@ -27,6 +27,7 @@ class AuthChallengeCubit extends Cubit<AuthChallengeState> {
   Future<void> loadChallenge({
     required String challengeId,
     required String systemId,
+    String? externalSystemId,
   }) async {
     emit(const AuthChallengeFetching());
     final result = await _receiveUseCase.execute(
