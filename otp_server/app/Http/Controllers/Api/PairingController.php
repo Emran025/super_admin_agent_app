@@ -56,9 +56,14 @@ class PairingController extends Controller
             return response()->json(['error' => 'Invalid pairing token.'], 401);
         }
 
-        $systemId = (string) Str::uuid();
-        $agentId  = (string) Str::uuid();
         $pairedAt = now();
+
+        // Preserve system_id and agent_id if this public key has already been paired.
+        // Regenerating them on re-pair invalidates the Reverb channel subscription the
+        // phone is already listening on, and orphans any ExternalSystem.agent_id links.
+        $existing = Agent::where('public_key_id', $data['public_key_id'])->first();
+        $systemId = $existing ? $existing->system_id : (string) Str::uuid();
+        $agentId  = $existing ? $existing->agent_id  : (string) Str::uuid();
 
         $agent = Agent::updateOrCreate(
             ['public_key_id' => $data['public_key_id']],
@@ -317,7 +322,7 @@ class PairingController extends Controller
             ->map(function ($ch) {
                 return [
                     'challenge_id'        => (string) $ch->id,
-                    'system_id'           => (string) ($ch->external_system_id ?? $ch->system_id),
+                    'system_id'           => (string) $ch->system_id,
                     'challenged_username' => $ch->challenged_username,
                     'issued_at'           => $ch->created_at->toIso8601String(),
                     'expires_at'          => $ch->expires_at->toIso8601String(),

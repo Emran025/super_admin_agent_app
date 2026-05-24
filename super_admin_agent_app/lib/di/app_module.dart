@@ -129,12 +129,15 @@ Future<void> setupDependencies() async {
   //     Replaces Firebase Cloud Messaging as the command delivery channel.
   //     HttpClientFactory is injected so _fetchChannelAuth can make ECDSA-signed
   //     requests to the broadcasting auth endpoint.
+  //     PairingRepository is injected so the heartbeat can refresh stale
+  //     grantedCapabilities without requiring a full re-pair.
   getIt.registerLazySingleton<AgentWebSocketService>(
     () => AgentWebSocketService(
       router: getIt<WsMessageRouter>(),
       registry: getIt<PairedSystemRegistry>(),
       secureStorage: getIt<SecureStorageService>(),
       clientFactory: getIt<HttpClientFactory>(),
+      pairingRepository: getIt<PairingRepository>(),
     ),
   );
 

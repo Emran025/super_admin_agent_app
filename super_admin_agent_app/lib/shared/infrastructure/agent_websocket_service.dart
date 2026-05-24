@@ -8,6 +8,8 @@ import 'package:super_admin_agent/shared/domain/signing_service.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../di/app_module.dart';
+import '../../domain/pairing/entities/paired_system.dart';
+import '../../domain/pairing/repositories/pairing_repository.dart';
 import '../data/http_client_factory.dart';
 import '../data/sqlite_audit_log_service.dart';
 import '../domain/paired_system_registry.dart';
@@ -65,6 +67,7 @@ class AgentWebSocketService {
   final PairedSystemRegistry _registry;
   final SecureStorageService _secureStorage;
   final HttpClientFactory _clientFactory;
+  final PairingRepository _pairingRepository;
   final _log = Logger(
     printer: PrettyPrinter(
       methodCount: 0,
@@ -109,10 +112,12 @@ class AgentWebSocketService {
     required PairedSystemRegistry registry,
     required SecureStorageService secureStorage,
     required HttpClientFactory clientFactory,
+    required PairingRepository pairingRepository,
   })  : _router = router,
         _registry = registry,
         _secureStorage = secureStorage,
-        _clientFactory = clientFactory;
+        _clientFactory = clientFactory,
+        _pairingRepository = pairingRepository;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -258,11 +263,42 @@ class AgentWebSocketService {
 
     try {
       final dio = _clientFactory.forSystem(systemId);
-      await dio.post<Map<String, dynamic>>(
+      final response = await dio.post<Map<String, dynamic>>(
         '${system.baseUrl}/api/v1/agent/heartbeat',
         data: <String, dynamic>{},
       );
       _log.d('[WS] Heartbeat sent for system $systemId');
+
+      // Refresh capabilities if the server reports a different set than what
+      // is currently stored on-device. This self-heals stale pairing data —
+      // e.g. a device paired before two_fa was added to the server's capability
+      // list — without requiring a full re-pair.
+      final data = response.data;
+      if (data != null) {
+        final rawCaps = data['capabilities'];
+        if (rawCaps is List) {
+          final serverCaps = List<String>.from(rawCaps.whereType<String>());
+          final storedCaps = List<String>.from(system.grantedCapabilities)..sort();
+          final serverCapsSorted = List<String>.from(serverCaps)..sort();
+
+          if (!_capabilitiesEqual(storedCaps, serverCapsSorted)) {
+            _log.i(
+              '[WS] Capability refresh: stored=$storedCaps server=$serverCapsSorted '
+              '— updating stored PairedSystem for $systemId',
+            );
+            final updated = PairedSystem(
+              agentId: system.agentId,
+              systemId: system.systemId,
+              systemLabel: system.systemLabel,
+              baseUrl: system.baseUrl,
+              grantedCapabilities: serverCaps,
+              pairedAt: system.pairedAt,
+            );
+            _registry.register(updated);
+            await _pairingRepository.savePairedSystem(updated);
+          }
+        }
+      }
     } catch (e) {
       if (e.toString().contains('timeout')) {
         // Downgrade timeout logs to debug to avoid console flooding on poor networks
@@ -271,6 +307,14 @@ class AgentWebSocketService {
         _log.w('[WS] Heartbeat failed (non-fatal): $e');
       }
     }
+  }
+
+  bool _capabilitiesEqual(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------------------

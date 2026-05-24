@@ -92,9 +92,39 @@ Future<void> main() async {
 }
 
 /// Dynamic dialog dispatcher for background-triggered 2FA authentication challenges.
-void _show2FaDialog(String commandId, String systemId, String? externalSystemId) {
+///
+/// Retries up to [_maxNavRetries] times (300 ms apart) when the navigator is
+/// not yet ready — this covers the race where the background service (running
+/// via autoStart from a previous session) fires show_challenge before runApp()
+/// has finished building the widget tree.
+const int _maxNavRetries = 6; // 6 × 300 ms = up to 1.8 s total wait
+
+void _show2FaDialog(
+  String commandId,
+  String systemId,
+  String? externalSystemId, [
+  int attempt = 0,
+]) {
   final navigatorState = navigatorKey.currentState;
-  if (navigatorState == null) return;
+
+  if (navigatorState == null) {
+    if (attempt >= _maxNavRetries) {
+      _log.e(
+        '[main] _show2FaDialog: navigator still null after $attempt retries '
+        '— dropping challenge $commandId',
+      );
+      return;
+    }
+    _log.w(
+      '[main] _show2FaDialog: navigator not ready (attempt $attempt) '
+      '— retrying in 300 ms for challenge $commandId',
+    );
+    Future.delayed(
+      const Duration(milliseconds: 300),
+      () => _show2FaDialog(commandId, systemId, externalSystemId, attempt + 1),
+    );
+    return;
+  }
 
   final cubit = getIt<AuthChallengeCubit>();
   cubit.loadChallenge(
