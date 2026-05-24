@@ -56,6 +56,10 @@ class AgentHeartbeatController extends Controller
 
         $agent->update(['last_seen_at' => now()]);
 
-        return response()->json(['status' => 'ok', 'seen_at' => now()->toIso8601String()]);
+        return response()->json([
+            'status'       => 'ok',
+            'seen_at'      => now()->toIso8601String(),
+            'capabilities' => $agent->capabilities ?? [],
+        ]);
     }
 }
