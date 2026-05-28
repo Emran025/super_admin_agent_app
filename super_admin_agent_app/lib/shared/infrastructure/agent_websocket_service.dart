@@ -81,6 +81,7 @@ class AgentWebSocketService {
   StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
+  Timer? _wsPingTimer;
   String? _socketId;
   int _reconnectDelaySecs = 2;
 
@@ -106,6 +107,11 @@ class AgentWebSocketService {
   static const int _maxReconnectDelaySecs = 60;
   static const String _pusherProtocol = '7';
   static const Duration _heartbeatInterval = Duration(seconds: 30);
+
+  /// How often the client sends a WebSocket-level pusher:ping to Reverb.
+  /// Must be strictly less than the server's activity_timeout (120 s) so
+  /// Reverb never sees the connection as idle long enough to close it.
+  static const Duration _wsPingInterval = Duration(seconds: 30);
 
   AgentWebSocketService({
     required WsMessageRouter router,
@@ -159,6 +165,8 @@ class AgentWebSocketService {
   void disconnect() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _wsPingTimer?.cancel();
+    _wsPingTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _subscription?.cancel();
@@ -379,11 +387,21 @@ class AgentWebSocketService {
       // old channel eventually closes and triggers a second reconnect loop.
       await _subscription?.cancel();
       _subscription = null;
+      _wsPingTimer?.cancel();
+      _wsPingTimer = null;
       _channel?.sink.close();
       _channel = null;
       _socketId = null;
 
       _channel = WebSocketChannel.connect(wsUri);
+
+      // Explicitly catch and log/suppress connection errors on the ready future to prevent unhandled exceptions.
+      // The stream's onError callback is already handling the connection failure and scheduling reconnects.
+      _channel!.ready.then((_) {
+        _log.d('[WS] Connection successfully established (ready completed)');
+      }).catchError((e) {
+        _log.w('[WS] Connection ready future failed (handled): $e');
+      });
 
       _subscription = _channel!.stream.listen(
         (raw) => _handleRawMessage(systemId, raw as String),
@@ -433,9 +451,12 @@ class AgentWebSocketService {
             'Agent is running — listening for commands',
           );
           _startHeartbeat(systemId);
+          _startWsPing();
         case 'pusher_internal:subscription_error':
           _log.e('[WS] Subscription error — scheduling reconnect');
           _isConnecting = false;
+          _wsPingTimer?.cancel();
+          _wsPingTimer = null;
           _updateNotification(
             'Channel auth rejected',
             'Server rejected the channel subscription — reconnecting…',
@@ -596,6 +617,30 @@ class AgentWebSocketService {
     _channel?.sink.add(json.encode(payload));
   }
 
+  // ---------------------------------------------------------------------------
+  // WebSocket-level keep-alive ping
+  // ---------------------------------------------------------------------------
+
+  /// Starts a periodic WebSocket-level ping that sends pusher:ping directly
+  /// over the socket every [_wsPingInterval].
+  ///
+  /// This is the **primary** keep-alive mechanism — it proves liveness to the
+  /// Reverb server over the WebSocket transport itself, unlike the HTTP
+  /// heartbeat which only updates last_seen_at in the database.
+  ///
+  /// Reverb's activity_timeout (120 s) is the grace window after the last
+  /// WebSocket message. By pinging every 30 s we stay well inside that window
+  /// and prevent the server from closing what it considers an idle connection.
+  void _startWsPing() {
+    _wsPingTimer?.cancel();
+    _wsPingTimer = Timer.periodic(_wsPingInterval, (_) {
+      if (_isOnline && _channel != null) {
+        _log.d('[WS] Sending client-initiated pusher:ping');
+        _send({'event': 'pusher:ping', 'data': {}});
+      }
+    });
+  }
+
   void _scheduleReconnect(String systemId) {
     // If the device is offline, don't schedule any reconnection timer.
     // The connectivity listener will trigger reconnection when the device
@@ -614,6 +659,8 @@ class AgentWebSocketService {
     _log.w('[WS] Scheduling reconnect in ${_reconnectDelaySecs}s');
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _wsPingTimer?.cancel();
+    _wsPingTimer = null;
     _reconnectTimer?.cancel();
 
     _updateNotification(
