@@ -117,19 +117,27 @@ class PairingRepositoryImpl implements PairingRepository {
             reverbAppKey: dto.reverbAppKey,
           );
         } else {
-          if (dto.reverbHost == 'localhost' || dto.reverbHost == '127.0.0.1') {
-            dto = PairedSystemDto(
-              agentId: dto.agentId,
-              systemId: dto.systemId,
-              systemLabel: dto.systemLabel,
-              baseUrl: dto.baseUrl,
-              grantedCapabilities: dto.grantedCapabilities,
-              pairedAt: dto.pairedAt,
-              reverbHost: parsedBaseUrl.host,
-              reverbPort: dto.reverbPort,
-              reverbAppKey: dto.reverbAppKey,
-            );
+          var updatedBaseUrl = dto.baseUrl;
+          if (parsedBaseUrl.scheme == 'http' && parsedEndpoint.scheme == 'https') {
+            updatedBaseUrl = parsedBaseUrl.replace(scheme: 'https').toString();
           }
+
+          String? resolvedHost = dto.reverbHost;
+          if (resolvedHost == 'localhost' || resolvedHost == '127.0.0.1') {
+            resolvedHost = parsedBaseUrl.host;
+          }
+
+          dto = PairedSystemDto(
+            agentId: dto.agentId,
+            systemId: dto.systemId,
+            systemLabel: dto.systemLabel,
+            baseUrl: updatedBaseUrl,
+            grantedCapabilities: dto.grantedCapabilities,
+            pairedAt: dto.pairedAt,
+            reverbHost: resolvedHost,
+            reverbPort: dto.reverbPort,
+            reverbAppKey: dto.reverbAppKey,
+          );
         }
       }
 

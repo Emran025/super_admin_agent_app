@@ -49,7 +49,7 @@ class Agent extends Model
         // 2. Query Reverb REST API
         try {
             $config = config('broadcasting.connections.reverb');
-            if ($config && isset($config['key'], $config['secret'], $config['app_id'])) {
+            if (class_exists(\Pusher\Pusher::class) && $config && isset($config['key'], $config['secret'], $config['app_id'])) {
                 // Query the local Reverb server process directly
                 $host = env('REVERB_SERVER_HOST', '127.0.0.1');
                 if ($host === '0.0.0.0') {
@@ -75,7 +75,7 @@ class Agent extends Model
                     return true;
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Ignore Reverb connection issues and rely on last_seen_at
         }
 
