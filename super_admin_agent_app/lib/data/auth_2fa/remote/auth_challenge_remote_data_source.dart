@@ -12,7 +12,7 @@ class AuthChallengeRemoteDataSource {
   Future<AuthChallenge> fetchChallenge(String challengeId) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
-        '/v1/challenges/$challengeId',
+        '/api/v1/push-challenges/$challengeId',
       );
       return AuthChallengeDto.fromJson(response.data!).toEntity();
     } on DioException catch (e) {
@@ -29,10 +29,11 @@ class AuthChallengeRemoteDataSource {
   Future<void> submitResponse(SignedChallengeResponse response) async {
     try {
       await _dio.post<void>(
-        '/v1/challenges/${response.challengeId}/respond',
+        '/api/v1/push-challenges/${response.challengeId}/respond',
         data: {
-          'decision': response.decision.name,
-          'responded_at': response.respondedAt.toIso8601String(),
+          'challenge_id': response.challengeId,
+          'decision': response.decision.name == 'approve' ? 'approved' : 'rejected',
+          'decided_at': response.respondedAt.toIso8601String(),
           'nonce': response.nonce,
           'agent_public_key_id': response.agentPublicKeyId,
           'signature': response.signature,

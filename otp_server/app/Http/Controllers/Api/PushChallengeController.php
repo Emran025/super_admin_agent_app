@@ -121,34 +121,27 @@ class PushChallengeController extends Controller
 
     public function respond(Request $request, string $challengeId): JsonResponse
     {
-        // --- 1. Agent authentication ---
-        $publicKeyId = $request->header('X-Agent-Public-Key-Id');
-        if (!$publicKeyId) {
-            return response()->json(['error' => 'Missing X-Agent-Public-Key-Id header.'], 401);
-        }
-
-        $agent = Agent::where('public_key_id', $publicKeyId)->first();
-        if (!$agent) {
-            return response()->json(['error' => 'Unknown agent.'], 401);
-        }
-
-        // --- 2. Validate body fields ---
+        // --- 1. Validate body fields ---
         $validated = $request->validate([
-            'challenge_id' => 'required|uuid',
-            'decision'     => 'required|in:approved,rejected',
-            'nonce'        => 'required|string|min:8',
-            'decided_at'   => 'required|string',
+            'challenge_id'        => 'required|uuid',
+            'decision'            => 'required|in:approved,rejected',
+            'nonce'               => 'required|string|min:8',
+            'decided_at'          => 'required|string',
+            'agent_public_key_id' => 'required|string',
+            'signature'           => 'required|string',
         ]);
 
         if ($validated['challenge_id'] !== $challengeId) {
             return response()->json(['error' => 'challenge_id mismatch.'], 422);
         }
 
-        // --- 3. Verify ECDSA signature ---
-        $nonce     = $request->header('X-Agent-Nonce', '');
-        $timestamp = $request->header('X-Agent-Timestamp', '');
-        $signature = $request->header('X-Agent-Signature', '');
+        // --- 2. Agent authentication ---
+        $agent = Agent::where('public_key_id', $validated['agent_public_key_id'])->first();
+        if (!$agent) {
+            return response()->json(['error' => 'Unknown agent.'], 401);
+        }
 
+        // --- 3. Verify ECDSA signature ---
         $signingInput = $this->verifier->buildPushChallengeSigningInput(
             challengeId: $challengeId,
             decision:    $validated['decision'],
@@ -158,7 +151,7 @@ class PushChallengeController extends Controller
 
         $isValid = $this->verifier->verify(
             signingInput:       $signingInput,
-            base64urlSignature: $signature,
+            base64urlSignature: $validated['signature'],
             base64urlPublicKey: $agent->agent_public_key,
         );
 

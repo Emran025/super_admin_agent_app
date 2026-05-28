@@ -453,7 +453,7 @@ class AgentWebSocketService {
           _startHeartbeat(systemId);
           _startWsPing();
         case 'pusher_internal:subscription_error':
-          _log.e('[WS] Subscription error — scheduling reconnect');
+          _log.e('[WS] Subscription error (data: $data) — scheduling reconnect');
           _isConnecting = false;
           _wsPingTimer?.cancel();
           _wsPingTimer = null;
@@ -462,11 +462,13 @@ class AgentWebSocketService {
             'Server rejected the channel subscription — reconnecting…',
           );
           _scheduleReconnect(systemId);
+        case 'pusher:error':
+          _log.e('[WS] Pusher error event received: data=$data');
         case 'App\\Events\\AgentCommandDispatched':
         case 'agent.command':
           await _onAgentCommand(data);
         default:
-          _log.d('[WS] Unhandled event: $event');
+          _log.d('[WS] Unhandled event: $event, data: $data');
       }
     } catch (e) {
       _log.e('[WS] Failed to parse message: $e\nRaw: $raw');

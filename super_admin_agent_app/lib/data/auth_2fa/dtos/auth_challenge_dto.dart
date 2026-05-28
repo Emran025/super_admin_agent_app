@@ -24,7 +24,7 @@ class AuthChallengeDto {
         systemId: json['system_id'] as String,
         issuedAt: json['issued_at'] as String,
         expiresAt: json['expires_at'] as String,
-        contextLabel: json['context_label'] as String,
+        contextLabel: json['challenged_username'] as String,
         status: (json['status'] as String?) ?? 'PENDING',
       );
 
