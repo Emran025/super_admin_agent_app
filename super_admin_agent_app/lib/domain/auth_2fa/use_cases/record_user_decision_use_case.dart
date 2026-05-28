@@ -38,9 +38,9 @@ class RecordUserDecisionUseCase {
     // Constraint 2.6: canonical signing input.
     final jsonStr = CanonicalJson.encode({
       'challenge_id': challenge.challengeId,
-      'decision': decision.name,
+      'decided_at': respondedAt.toIso8601String(),
+      'decision': decision.name == 'approve' ? 'approved' : 'rejected',
       'nonce': nonce,
-      'responded_at': respondedAt.toIso8601String(),
     });
     final signingInput = '$jsonStr\n$nonce\n${respondedAt.toIso8601String()}';
 

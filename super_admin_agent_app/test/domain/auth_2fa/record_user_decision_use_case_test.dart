@@ -72,7 +72,7 @@ void main() {
     final captured = verify(() => signingService.sign(captureAny())).captured;
     final signingInput = captured.first as String;
     expect(signingInput, contains('nonce-abc'));
-    expect(signingInput, contains('"decision":"reject"'));
+    expect(signingInput, contains('"decision":"rejected"'));
   });
 
   test('two consecutive calls generate different nonces (Invariant 4)', () async {

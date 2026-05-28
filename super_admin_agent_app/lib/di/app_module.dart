@@ -82,7 +82,8 @@ Future<void> setupDependencies() async {
     () => const CryptoNonceGenerator(),
   );
 
-  // 4. Audit log service — singleton, already initialized via SqliteAuditLogService.init().
+  // 4. Audit log service.
+  await SqliteAuditLogService.init();
   getIt.registerLazySingleton<AuditLogService>(
     () => SqliteAuditLogService.instance,
   );

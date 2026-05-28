@@ -29,6 +29,7 @@ class AndroidKeystoreSigningService implements SigningService {
 
   String? _cachedPublicKeyBase64;
   String? _cachedKeyId;
+  Uint8List? _cachedPrivateKeyBytes;
 
   AndroidKeystoreSigningService({required SecureStorageService secureStorage})
       : _secureStorage = secureStorage;
@@ -130,6 +131,7 @@ class AndroidKeystoreSigningService implements SigningService {
 
       _cachedPublicKeyBase64 = base64Url.encode(publicBytes);
       _cachedKeyId = keyId;
+      _cachedPrivateKeyBytes = privateBytes;
 
       return const Right(null);
     } catch (e) {
@@ -146,22 +148,15 @@ class AndroidKeystoreSigningService implements SigningService {
       // The interceptor reads publicKeyId *after* sign() returns, so loading
       // it here — on the first sign() call — ensures it is always available
       // before the header is set on the outgoing request.
-      if (_cachedKeyId == null) {
+      if (_cachedKeyId == null || _cachedPrivateKeyBytes == null) {
         await _loadCachedPublicKey();
       }
 
-      // Read private key from secure storage.
-      final readResult = await _secureStorage.read(key: _privateKeyStorageKey);
-      final privateKeyBase64 = readResult.fold(
-        (_) => null,
-        (v) => v,
-      );
-
-      if (privateKeyBase64 == null) {
+      final privateBytes = _cachedPrivateKeyBytes;
+      if (privateBytes == null) {
         return const Left(KeyUnavailableFailure());
       }
 
-      final privateBytes = base64Url.decode(privateKeyBase64);
       final domainParams = ECDomainParameters('prime256v1');
       final privateKey = ECPrivateKey(
         _decodeBigInt(privateBytes),
@@ -199,6 +194,7 @@ class AndroidKeystoreSigningService implements SigningService {
       await _secureStorage.delete(key: _keyIdStorageKey);
       _cachedPublicKeyBase64 = null;
       _cachedKeyId = null;
+      _cachedPrivateKeyBytes = null;
       return const Right(null);
     } catch (e) {
       return Left(SigningOperationFailure(cause: e));
@@ -214,6 +210,12 @@ class AndroidKeystoreSigningService implements SigningService {
     pubResult.fold((_) {}, (v) => _cachedPublicKeyBase64 = v);
     final idResult = await _secureStorage.read(key: _keyIdStorageKey);
     idResult.fold((_) {}, (v) => _cachedKeyId = v);
+    final privResult = await _secureStorage.read(key: _privateKeyStorageKey);
+    privResult.fold((_) {}, (v) {
+      if (v != null) {
+        _cachedPrivateKeyBytes = base64Url.decode(v);
+      }
+    });
   }
 
   Uint8List _encodePrivateKey(ECPrivateKey key) {
