@@ -21,7 +21,7 @@ class OtpGatewayRemoteDataSource {
   Future<OtpDispatchCommand> fetchCommand(String commandId) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
-        '/v1/otp-commands/$commandId',
+        '/api/v1/otp-commands/$commandId',
       );
       return OtpDispatchCommandDto.fromJson(response.data!).toEntity();
     } on DioException catch (e) {
@@ -39,11 +39,16 @@ class OtpGatewayRemoteDataSource {
   ///
   /// The POST body contains only signed metadata — NO message body.
   Future<void> submitDeliveryReport(SmsDeliveryReport report) async {
+    final serverStatus = switch (report.status) {
+      SmsDeliveryStatus.sent || SmsDeliveryStatus.delivered => 'delivered',
+      SmsDeliveryStatus.failedNoService || SmsDeliveryStatus.failedGeneric => 'failed',
+    };
+
     await _dio.post<void>(
-      '/v1/otp-commands/${report.commandId}/report',
+      '/api/v1/otp-commands/${report.commandId}/report',
       data: {
         'command_id': report.commandId,
-        'status': report.status.name,
+        'status': serverStatus,
         'reported_at': report.reportedAt.toIso8601String(),
         'nonce': report.nonce,
         'agent_public_key_id': report.agentPublicKeyId,

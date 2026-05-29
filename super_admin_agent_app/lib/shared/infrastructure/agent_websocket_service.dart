@@ -440,7 +440,8 @@ class AgentWebSocketService {
         case 'pusher:connection_established':
           await _onConnectionEstablished(systemId, data as String);
         case 'pusher:ping':
-          _send({'event': 'pusher:pong', 'data': {}});
+          _log.d('[WS] Responding to server-initiated pusher:ping with pusher:pong');
+          _send({'event': 'pusher:pong'});
         case 'pusher_internal:subscription_succeeded':
           _log.i('[WS] Subscribed to private-agent.$systemId');
           _reconnectDelaySecs = 2; // reset back-off on confirmed subscription

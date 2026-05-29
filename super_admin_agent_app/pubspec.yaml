@@ -22,6 +22,8 @@ dependencies:
   pointycastle: ^3.9.1
   web_socket_channel: ^3.0.1
   flutter_background_service: ^5.0.5
+  sms_sender:
+    path: ./sms_sender
   mobile_scanner: ^5.2.3
   decimal: ^3.0.2
   uuid: ^4.4.2

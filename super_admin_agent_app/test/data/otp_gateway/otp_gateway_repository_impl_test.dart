@@ -27,7 +27,7 @@ void main() {
       const plaintextOtpMessage = 'Hi! Your verification code is: 123456';
       
       // Stub the GET response from the server (which returns the template message)
-      when(() => dio.get<Map<String, dynamic>>('/v1/otp-commands/$commandId'))
+      when(() => dio.get<Map<String, dynamic>>('/api/v1/otp-commands/$commandId'))
           .thenAnswer((_) async => Response<Map<String, dynamic>>(
                 requestOptions: RequestOptions(path: ''),
                 statusCode: 200,

@@ -15,7 +15,7 @@ class PaymentObservationRemoteDataSource {
   Future<PaymentObservationSession> fetchSession(String sessionId) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
-        '/v1/payment-sessions/$sessionId',
+        '/api/v1/payment-sessions/$sessionId',
       );
       return PaymentObservationSessionDto.fromJson(response.data!).toEntity();
     } on DioException catch (e) {
@@ -31,7 +31,7 @@ class PaymentObservationRemoteDataSource {
 
   Future<void> submitReport(ObservationReport report) async {
     await _dio.post<void>(
-      '/v1/payment-sessions/${report.sessionId}/report',
+      '/api/v1/payment-sessions/${report.sessionId}/report',
       data: ObservationReportDto.toJson(report),
     );
   }
