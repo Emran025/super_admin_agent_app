@@ -14,6 +14,8 @@ import '../remote/otp_gateway_remote_data_source.dart';
 class OtpGatewayRepositoryImpl implements OtpGatewayRepository {
   final HttpClientFactory _clientFactory;
   final Map<String, String> _messageBodyCache = {};
+  final Map<String, String> _customerNameCache = {};
+  final Map<String, String> _systemNameCache = {};
 
   OtpGatewayRepositoryImpl({required HttpClientFactory clientFactory})
       : _clientFactory = clientFactory;
@@ -21,6 +23,12 @@ class OtpGatewayRepositoryImpl implements OtpGatewayRepository {
   @override
   void cacheMessageBody(String commandId, String messageBody) {
     _messageBodyCache[commandId] = messageBody;
+  }
+
+  @override
+  void cacheCustomerAndSystem(String commandId, String customerName, String systemName) {
+    _customerNameCache[commandId] = customerName;
+    _systemNameCache[commandId] = systemName;
   }
 
   @override
@@ -36,6 +44,14 @@ class OtpGatewayRepositoryImpl implements OtpGatewayRepository {
       final cachedBody = _messageBodyCache.remove(commandId);
       if (cachedBody != null) {
         command = command.copyWith(messageBody: cachedBody);
+      }
+      final cachedCustomer = _customerNameCache.remove(commandId);
+      final cachedSystem = _systemNameCache.remove(commandId);
+      if (cachedCustomer != null || cachedSystem != null) {
+        command = command.copyWith(
+          customerName: cachedCustomer,
+          systemName: cachedSystem,
+        );
       }
       return Right(command);
     } on OtpGatewayFailure catch (f) {

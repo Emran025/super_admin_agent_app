@@ -24,24 +24,36 @@ class AndroidSmsSenderService implements SmsSenderService {
     required String recipientPhoneNumber,
     required String messageBody,
     required SimSlot simSlot,
+    required String customerName,
+    required String systemName,
   }) async {
     try {
+      print('🐛 [OTP] AndroidSmsSenderService invoking MethodChannel "sendSms" for customer: $customerName from system: $systemName...');
       final result = await _channel.invokeMethod<String>('sendSms', {
         'recipient': recipientPhoneNumber,
         'body': messageBody,
         'sim_slot': simSlot.name,
+        'customer_name': customerName,
+        'system_name': systemName,
       });
+      print('🐛 [OTP] AndroidSmsSenderService MethodChannel result: $result');
 
       return _mapStatus(result);
-    } on PlatformException {
+    } on PlatformException catch (e) {
+      print('🐛 [OTP] AndroidSmsSenderService PlatformException: $e');
       // TODO(phase-7-android): Map specific PlatformException codes to statuses.
       return SmsDeliveryStatus.failedGeneric;
-    } catch (_) {
+    } catch (e) {
+      print('🐛 [OTP] AndroidSmsSenderService generic exception: $e');
       return SmsDeliveryStatus.failedGeneric;
     }
   }
 
   SmsDeliveryStatus _mapStatus(String? result) {
+    if (result != null && result.startsWith('failed_generic_')) {
+      print('🐛 [OTP] AndroidSmsSenderService OS rejected SMS with code: $result (1=Generic Failure, 2=Radio Off, 4=No Service)');
+      return SmsDeliveryStatus.failedGeneric;
+    }
     return switch (result) {
       'sent' => SmsDeliveryStatus.sent,
       'delivered' => SmsDeliveryStatus.delivered,

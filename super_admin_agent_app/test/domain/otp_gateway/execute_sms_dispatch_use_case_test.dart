@@ -55,6 +55,8 @@ void main() {
           recipientPhoneNumber: '+1234567890',
           messageBody: 'Your OTP is 123456',
           simSlot: SimSlot.defaultSlot,
+          customerName: any(named: 'customerName'),
+          systemName: any(named: 'systemName'),
         ));
   });
 
@@ -63,6 +65,8 @@ void main() {
           recipientPhoneNumber: '+1234567890',
           messageBody: 'Your OTP is 123456',
           simSlot: SimSlot.defaultSlot,
+          customerName: any(named: 'customerName'),
+          systemName: any(named: 'systemName'),
         )).thenAnswer((_) async => SmsDeliveryStatus.sent);
     when(() => nonceGenerator.generate()).thenReturn('nonce-1');
     when(() => signingService.sign(any())).thenAnswer((_) async => const Right('sig-1'));
@@ -79,6 +83,8 @@ void main() {
           recipientPhoneNumber: '+1234567890',
           messageBody: 'Your OTP is 123456',
           simSlot: SimSlot.defaultSlot,
+          customerName: any(named: 'customerName'),
+          systemName: any(named: 'systemName'),
         )).called(1);
   });
 }

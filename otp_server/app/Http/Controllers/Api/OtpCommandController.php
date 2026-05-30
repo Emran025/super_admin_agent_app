@@ -80,6 +80,9 @@ class OtpCommandController extends Controller
             return response()->json(['error' => 'Command has expired.'], 410);
         }
 
+        $systemName = $dispatch->externalSystem ? $dispatch->externalSystem->name : 'SuperAdmin';
+        $customerName = $dispatch->user ? $dispatch->user->name : 'Customer';
+
         // message_body is NOT stored server-side (the plaintext OTP was delivered
         // via the Reverb WebSocket event and is never persisted — Axiom 3 / Constraint 2.3).
         // This field returns a safe template so the Flutter DTO can still be parsed.
@@ -90,6 +93,8 @@ class OtpCommandController extends Controller
             'message_body'           => 'Your verification code was delivered via the secure agent channel.',
             'issued_at'              => $dispatch->created_at->toIso8601String(),
             'sim_slot'               => 'defaultSlot',
+            'customer_name'          => $customerName,
+            'system_name'            => $systemName,
         ]);
     }
 }

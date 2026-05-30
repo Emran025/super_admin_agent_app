@@ -21,9 +21,19 @@ class OtpGatewayWsHandler implements CapabilityCommandHandler {
     required String systemId,
     Map<String, dynamic>? payload,
   }) async {
+    print('🐛 [OTP] OtpGatewayWsHandler.handle received command: $commandId');
     final messageBody = payload?['message_body'] as String?;
     if (messageBody != null && messageBody.isNotEmpty) {
       _getIt<OtpGatewayRepository>().cacheMessageBody(commandId, messageBody);
+    }
+    final customerName = payload?['customer_name'] as String?;
+    final systemName = payload?['system_name'] as String?;
+    if (customerName != null || systemName != null) {
+      _getIt<OtpGatewayRepository>().cacheCustomerAndSystem(
+        commandId,
+        customerName ?? 'Customer',
+        systemName ?? 'SuperAdmin',
+      );
     }
 
     final cubit = _getIt<OtpDispatchCubit>();

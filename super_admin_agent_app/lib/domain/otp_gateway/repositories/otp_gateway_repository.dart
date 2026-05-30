@@ -26,4 +26,5 @@ abstract class OtpGatewayRepository {
   });
 
   void cacheMessageBody(String commandId, String messageBody);
+  void cacheCustomerAndSystem(String commandId, String customerName, String systemName);
 }

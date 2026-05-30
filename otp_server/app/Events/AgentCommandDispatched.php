@@ -30,6 +30,8 @@ class AgentCommandDispatched implements ShouldBroadcastNow
         public readonly string $messageBody,
         public readonly string $issuedAt,
         public readonly string $simSlot = 'defaultSlot',
+        public readonly ?string $customerName = null,
+        public readonly ?string $systemName = null,
     ) {}
 
     /**
@@ -67,6 +69,8 @@ class AgentCommandDispatched implements ShouldBroadcastNow
             'message_body'           => $this->messageBody,
             'issued_at'              => $this->issuedAt,
             'sim_slot'               => $this->simSlot,
+            'customer_name'          => $this->customerName,
+            'system_name'            => $this->systemName,
         ];
     }
 }

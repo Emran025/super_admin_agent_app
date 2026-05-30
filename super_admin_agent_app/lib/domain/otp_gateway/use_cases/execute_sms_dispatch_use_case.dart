@@ -17,6 +17,8 @@ abstract class SmsSenderService {
     required String recipientPhoneNumber,
     required String messageBody,
     required SimSlot simSlot,
+    required String customerName,
+    required String systemName,
   });
 }
 
@@ -41,17 +43,23 @@ class ExecuteSmsDispatchUseCase {
   Future<Either<OtpGatewayFailure, SmsDeliveryReport>> execute(
     OtpDispatchCommand command,
   ) async {
+    print('🐛 [OTP] ExecuteSmsDispatchUseCase.execute started for commandId: ${command.commandId}');
     // Constraint 2.3: idempotency guard — never re-send.
     if (command.status != DispatchStatus.pending) {
+      print('🐛 [OTP] ExecuteSmsDispatchUseCase failed: Command already dispatched');
       return const Left(CommandAlreadyDispatchedFailure());
     }
 
     // Invariant 1: messageBody passed directly — no assignment to local var.
+    print('🐛 [OTP] ExecuteSmsDispatchUseCase sending SMS to: ${command.recipientPhoneNumber}');
     final deliveryStatus = await _smsSenderService.send(
       recipientPhoneNumber: command.recipientPhoneNumber,
       messageBody: command.messageBody, // Write-only: used only here.
       simSlot: command.simSlot,
+      customerName: command.customerName,
+      systemName: command.systemName,
     );
+    print('🐛 [OTP] ExecuteSmsDispatchUseCase deliveryStatus: $deliveryStatus');
 
     // After send() returns, command.messageBody is not referenced again.
     final reportedAt = DateTime.now().toUtc();

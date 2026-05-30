@@ -33,22 +33,29 @@ class OtpDispatchCubit extends Cubit<OtpDispatchState> {
     required String commandId,
     required String systemId,
   }) async {
+    print('🐛 [OTP] OtpDispatchCubit.handleCommand started for commandId: $commandId');
     emit(const OtpFetching());
 
     final fetchResult = await _receiveUseCase.execute(
       commandId: commandId,
       systemId: systemId,
     );
+    print('🐛 [OTP] OtpDispatchCubit fetchResult: $fetchResult');
 
     await fetchResult.fold(
       (f) async => emit(OtpError(_otpFailureMsg(f))),
       (command) async {
         emit(const OtpDispatching());
+        print('🐛 [OTP] OtpDispatchCubit executing SMS dispatch...');
 
         final executeResult = await _executeUseCase.execute(command);
+        print('🐛 [OTP] OtpDispatchCubit executeResult: $executeResult');
 
         await executeResult.fold(
-          (f) async => emit(OtpError(_otpFailureMsg(f))),
+          (f) async {
+             print('🐛 [OTP] OtpDispatchCubit executeResult failed: $f');
+             emit(OtpError(_otpFailureMsg(f)));
+          },
           (report) async {
             final reportResult = await _reportUseCase.execute(
               report: report,

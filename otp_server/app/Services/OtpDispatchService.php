@@ -66,6 +66,9 @@ class OtpDispatchService
             recipientPhoneNumber:  $phoneNumber,
             messageBody:           $messageBody,
             issuedAt:              now()->toIso8601String(),
+            simSlot:               'defaultSlot',
+            customerName:          $contactName ?: 'Admin',
+            systemName:            'SuperAdmin',
         ));
 
         $dispatch->update(['status' => 'dispatched']);
