@@ -6,6 +6,7 @@ import '../../../domain/pairing/entities/linked_system.dart';
 import '../../../domain/pairing/entities/paired_system.dart';
 import '../../../shared/domain/paired_system_registry.dart';
 import '../../../shared/domain/audit_log_service.dart';
+import '../../../shared/infrastructure/default_sms_app_service.dart';
 import '../../pairing/cubit/pairing_cubit.dart';
 import '../../pairing/cubit/pairing_state.dart';
 import '../cubit/linked_systems_cubit.dart';
@@ -28,11 +29,50 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   List<AuditEntry> _recentLogs = [];
   bool _loadingLogs = false;
+  bool? _isDefaultSmsApp; // null = not yet checked
+  bool _requestingDefault = false;
+  final _defaultSmsService = const DefaultSmsAppService();
 
   @override
   void initState() {
     super.initState();
     _refreshAll();
+    _checkDefaultSmsApp();
+  }
+
+  Future<void> _checkDefaultSmsApp() async {
+    try {
+      final isDefault = await _defaultSmsService.isDefaultSmsApp();
+      if (mounted) setState(() => _isDefaultSmsApp = isDefault);
+    } catch (_) {
+      // Platform may not support; ignore
+    }
+  }
+
+  Future<void> _requestDefaultSmsApp() async {
+    setState(() => _requestingDefault = true);
+    try {
+      final result = await _defaultSmsService.requestDefaultSmsApp();
+      if (mounted) {
+        await _checkDefaultSmsApp();
+        if (result == 'granted') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ تم تعيين التطبيق كتطبيق الرسائل الافتراضي'),
+              backgroundColor: Color(0xFF10B981),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _requestingDefault = false);
+    }
   }
 
   void _refreshAll() {
@@ -178,6 +218,10 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── Default SMS App Warning Banner ──────────────────────────────
+          if (_isDefaultSmsApp == false) _buildDefaultSmsWarning(),
+          if (_isDefaultSmsApp == false) const SizedBox(height: SpacingTokens.md),
+
           // 1. Connection Status Banner
           _buildStatusBanner(context, primarySystem),
           const SizedBox(height: SpacingTokens.lg),
@@ -265,6 +309,71 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
           const SizedBox(height: 80), // bottom spacer for FAB
+        ],
+      ),
+    );
+  }
+
+  // ── Default SMS App warning card ───────────────────────────────────────────
+  Widget _buildDefaultSmsWarning() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(RadiusTokens.md),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+      ),
+      padding: const EdgeInsets.all(SpacingTokens.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'التطبيق ليس تطبيق الرسائل الافتراضي',
+                  style: TextStyle(
+                    color: Color(0xFFF59E0B),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'لكي تظهر الرسائل المُرسَلة في تطبيق الرسائل وتعمل بشكل موثوق، '
+            'يجب تعيين هذا التطبيق كتطبيق الرسائل الافتراضي.',
+            style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _requestingDefault ? null : _requestDefaultSmsApp,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(RadiusTokens.sm),
+                ),
+              ),
+              icon: _requestingDefault
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                    )
+                  : const Icon(Icons.sms, size: 18),
+              label: Text(
+                _requestingDefault ? 'جارٍ الطلب...' : 'تعيين كتطبيق افتراضي',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
         ],
       ),
     );
