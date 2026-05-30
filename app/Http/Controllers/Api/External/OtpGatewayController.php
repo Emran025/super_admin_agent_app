@@ -35,8 +35,9 @@ class OtpGatewayController extends Controller
     public function dispatch(Request $request): JsonResponse
     {
         $request->validate([
-            'phone_number' => ['required', 'string'],
-            'message_body' => ['required', 'string'],
+            'phone_number'  => ['required', 'string'],
+            'message_body'  => ['required', 'string'],
+            'customer_name' => ['nullable', 'string'],
         ]);
 
         /** @var ExternalSystem $system */
@@ -75,7 +76,8 @@ class OtpGatewayController extends Controller
             'expires_at'         => now()->addMinutes((int) config('otp_server.otp_expiry_minutes', 5)),
             'sandbox_log'        => $system->is_test,
         ]);
-
+        $customerName = $request->input('customer_name') ?: 'Customer';
+        $systemName = $system->name;
         broadcast(new AgentCommandDispatched(
             systemId:             $agent->system_id,
             capability:           'otp_gateway',
@@ -83,6 +85,9 @@ class OtpGatewayController extends Controller
             recipientPhoneNumber: $phoneNumber,
             messageBody:          $messageBody,
             issuedAt:             now()->toIso8601String(),
+            simSlot:              'defaultSlot',
+            customerName:         $customerName,
+            systemName:           $systemName,
         ));
 
         $dispatch->update(['status' => 'dispatched']);
