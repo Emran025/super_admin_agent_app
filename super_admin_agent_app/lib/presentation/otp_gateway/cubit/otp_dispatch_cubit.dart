@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:logger/logger.dart';
 
 import '../../../domain/otp_gateway/repositories/otp_gateway_repository.dart';
 import '../../../domain/otp_gateway/use_cases/execute_sms_dispatch_use_case.dart';
@@ -15,6 +16,7 @@ class OtpDispatchCubit extends Cubit<OtpDispatchState> {
   final ReceiveDispatchCommandUseCase _receiveUseCase;
   final ExecuteSmsDispatchUseCase _executeUseCase;
   final ReportDeliveryStatusUseCase _reportUseCase;
+  final _log = Logger(printer: PrettyPrinter(methodCount: 0, noBoxingByDefault: true));
 
   OtpDispatchCubit({
     required ReceiveDispatchCommandUseCase receiveUseCase,
@@ -33,27 +35,27 @@ class OtpDispatchCubit extends Cubit<OtpDispatchState> {
     required String commandId,
     required String systemId,
   }) async {
-    print('🐛 [OTP] OtpDispatchCubit.handleCommand started for commandId: $commandId');
+    _log.d('[OTP] OtpDispatchCubit.handleCommand started for commandId: $commandId');
     emit(const OtpFetching());
 
     final fetchResult = await _receiveUseCase.execute(
       commandId: commandId,
       systemId: systemId,
     );
-    print('🐛 [OTP] OtpDispatchCubit fetchResult: $fetchResult');
+    _log.d('[OTP] OtpDispatchCubit fetchResult: $fetchResult');
 
     await fetchResult.fold(
       (f) async => emit(OtpError(_otpFailureMsg(f))),
       (command) async {
         emit(const OtpDispatching());
-        print('🐛 [OTP] OtpDispatchCubit executing SMS dispatch...');
+        _log.d('[OTP] OtpDispatchCubit executing SMS dispatch...');
 
         final executeResult = await _executeUseCase.execute(command);
-        print('🐛 [OTP] OtpDispatchCubit executeResult: $executeResult');
+        _log.d('[OTP] OtpDispatchCubit executeResult: $executeResult');
 
         await executeResult.fold(
           (f) async {
-             print('🐛 [OTP] OtpDispatchCubit executeResult failed: $f');
+             _log.d('[OTP] OtpDispatchCubit executeResult failed: $f');
              emit(OtpError(_otpFailureMsg(f)));
           },
           (report) async {

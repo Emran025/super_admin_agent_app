@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:logger/logger.dart';
 
 import '../../domain/otp_gateway/entities/otp_dispatch_command.dart';
 import '../../domain/otp_gateway/use_cases/execute_sms_dispatch_use_case.dart';
@@ -16,6 +17,7 @@ import '../../domain/otp_gateway/value_objects/sms_delivery_report.dart';
 class AndroidSmsSenderService implements SmsSenderService {
   static const MethodChannel _channel =
       MethodChannel('com.superadmin.agent/sms_sender');
+  static final _log = Logger(printer: PrettyPrinter(methodCount: 0, noBoxingByDefault: true));
 
   const AndroidSmsSenderService();
 
@@ -28,7 +30,7 @@ class AndroidSmsSenderService implements SmsSenderService {
     required String systemName,
   }) async {
     try {
-      print('🐛 [OTP] AndroidSmsSenderService invoking MethodChannel "sendSms" for customer: $customerName from system: $systemName...');
+      _log.d('[OTP] AndroidSmsSenderService invoking MethodChannel "sendSms" for customer: $customerName from system: $systemName...');
       final result = await _channel.invokeMethod<String>('sendSms', {
         'recipient': recipientPhoneNumber,
         'body': messageBody,
@@ -36,22 +38,22 @@ class AndroidSmsSenderService implements SmsSenderService {
         'customer_name': customerName,
         'system_name': systemName,
       });
-      print('🐛 [OTP] AndroidSmsSenderService MethodChannel result: $result');
+      _log.d('[OTP] AndroidSmsSenderService MethodChannel result: $result');
 
       return _mapStatus(result);
     } on PlatformException catch (e) {
-      print('🐛 [OTP] AndroidSmsSenderService PlatformException: $e');
+      _log.w('[OTP] AndroidSmsSenderService PlatformException: $e');
       // TODO(phase-7-android): Map specific PlatformException codes to statuses.
       return SmsDeliveryStatus.failedGeneric;
     } catch (e) {
-      print('🐛 [OTP] AndroidSmsSenderService generic exception: $e');
+      _log.w('[OTP] AndroidSmsSenderService generic exception: $e');
       return SmsDeliveryStatus.failedGeneric;
     }
   }
 
   SmsDeliveryStatus _mapStatus(String? result) {
     if (result != null && result.startsWith('failed_generic_')) {
-      print('🐛 [OTP] AndroidSmsSenderService OS rejected SMS with code: $result (1=Generic Failure, 2=Radio Off, 4=No Service)');
+      _log.w('[OTP] AndroidSmsSenderService OS rejected SMS with code: $result (1=Generic Failure, 2=Radio Off, 4=No Service)');
       return SmsDeliveryStatus.failedGeneric;
     }
     return switch (result) {

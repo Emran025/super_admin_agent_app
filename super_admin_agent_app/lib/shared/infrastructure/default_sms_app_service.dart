@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:logger/logger.dart';
 
 /// Dart interface to the Android "app_control" MethodChannel.
 ///
@@ -13,6 +14,7 @@ import 'package:flutter/services.dart';
 class DefaultSmsAppService {
   static const MethodChannel _channel =
       MethodChannel('com.superadmin.agent/app_control');
+  static final _log = Logger(printer: PrettyPrinter(methodCount: 0, noBoxingByDefault: true));
 
   const DefaultSmsAppService();
 
@@ -22,7 +24,7 @@ class DefaultSmsAppService {
       final result = await _channel.invokeMethod<bool>('isDefaultSmsApp');
       return result ?? false;
     } on PlatformException catch (e) {
-      print('⚠️ [DefaultSmsApp] isDefaultSmsApp error: $e');
+      _log.w('[DefaultSmsApp] isDefaultSmsApp error: $e');
       return false;
     }
   }
@@ -40,7 +42,7 @@ class DefaultSmsAppService {
       final result = await _channel.invokeMethod<String>('requestDefaultSmsApp');
       return result ?? 'denied';
     } on PlatformException catch (e) {
-      print('⚠️ [DefaultSmsApp] requestDefaultSmsApp error: $e');
+      _log.w('[DefaultSmsApp] requestDefaultSmsApp error: $e');
       rethrow;
     }
   }

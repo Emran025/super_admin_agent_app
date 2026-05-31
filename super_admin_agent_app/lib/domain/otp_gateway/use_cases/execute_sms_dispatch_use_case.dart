@@ -1,4 +1,5 @@
 import 'package:dartz/dartz.dart';
+import 'package:logger/logger.dart';
 import '../entities/dispatch_status.dart';
 import '../entities/otp_dispatch_command.dart';
 import '../repositories/otp_gateway_repository.dart';
@@ -31,8 +32,10 @@ class ExecuteSmsDispatchUseCase {
   final SmsSenderService _smsSenderService;
   final SigningService _signingService;
   final NonceGenerator _nonceGenerator;
+  static final _log =
+      Logger(printer: PrettyPrinter(methodCount: 0, noBoxingByDefault: true));
 
-  const ExecuteSmsDispatchUseCase({
+  ExecuteSmsDispatchUseCase({
     required SmsSenderService smsSenderService,
     required SigningService signingService,
     required NonceGenerator nonceGenerator,
@@ -43,15 +46,18 @@ class ExecuteSmsDispatchUseCase {
   Future<Either<OtpGatewayFailure, SmsDeliveryReport>> execute(
     OtpDispatchCommand command,
   ) async {
-    print('🐛 [OTP] ExecuteSmsDispatchUseCase.execute started for commandId: ${command.commandId}');
+    _log.d(
+        '[OTP] ExecuteSmsDispatchUseCase.execute started for commandId: ${command.commandId}');
     // Constraint 2.3: idempotency guard — never re-send.
     if (command.status != DispatchStatus.pending) {
-      print('🐛 [OTP] ExecuteSmsDispatchUseCase failed: Command already dispatched');
+      _log.d(
+          '[OTP] ExecuteSmsDispatchUseCase failed: Command already dispatched');
       return const Left(CommandAlreadyDispatchedFailure());
     }
 
     // Invariant 1: messageBody passed directly — no assignment to local var.
-    print('🐛 [OTP] ExecuteSmsDispatchUseCase sending SMS to: ${command.recipientPhoneNumber}');
+    _log.d(
+        '[OTP] ExecuteSmsDispatchUseCase sending SMS to: ${command.recipientPhoneNumber}');
     final deliveryStatus = await _smsSenderService.send(
       recipientPhoneNumber: command.recipientPhoneNumber,
       messageBody: command.messageBody, // Write-only: used only here.
@@ -59,7 +65,7 @@ class ExecuteSmsDispatchUseCase {
       customerName: command.customerName,
       systemName: command.systemName,
     );
-    print('🐛 [OTP] ExecuteSmsDispatchUseCase deliveryStatus: $deliveryStatus');
+    _log.d('[OTP] ExecuteSmsDispatchUseCase deliveryStatus: $deliveryStatus');
 
     // After send() returns, command.messageBody is not referenced again.
     final reportedAt = DateTime.now().toUtc();
@@ -67,7 +73,9 @@ class ExecuteSmsDispatchUseCase {
 
     final serverStatus = switch (deliveryStatus) {
       SmsDeliveryStatus.sent || SmsDeliveryStatus.delivered => 'delivered',
-      SmsDeliveryStatus.failedNoService || SmsDeliveryStatus.failedGeneric => 'failed',
+      SmsDeliveryStatus.failedNoService ||
+      SmsDeliveryStatus.failedGeneric =>
+        'failed',
     };
 
     final jsonStr = CanonicalJson.encode({

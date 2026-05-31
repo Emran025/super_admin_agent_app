@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:logger/logger.dart';
 import 'package:super_admin_agent/shared/domain/signing_service.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../di/app_module.dart';
@@ -393,15 +395,33 @@ class AgentWebSocketService {
       _channel = null;
       _socketId = null;
 
-      _channel = WebSocketChannel.connect(wsUri);
+      // Use dart:io WebSocket.connect directly with a custom HttpClient.
+      //
+      // ROOT CAUSE of "Null check operator used on a null value":
+      //   dart:io's HttpClient internally calls the Android system proxy
+      //   resolver (HttpClient.findProxy). Inside a background isolate
+      //   (AgentForegroundService._onStart) the proxy resolver returns null
+      //   on many Android versions, causing a null-check crash deep inside
+      //   _HttpClient._openUrl() before the connection even attempts TLS.
+      //
+      // FIX: Set findProxy = (uri) => 'DIRECT' to bypass the system proxy
+      //   resolver entirely. badCertificateCallback is kept as a safety net
+      //   for servers with self-signed or chain-incomplete certificates.
+      final httpClient = HttpClient()
+        ..findProxy = ((uri) => 'DIRECT')
+        ..badCertificateCallback = (cert, host, port) {
+          _log.w('[WS] TLS cert issue for $host:$port — '
+              'subject=${cert.subject}, issuer=${cert.issuer}');
+          return true;
+        };
 
-      // Explicitly catch and log/suppress connection errors on the ready future to prevent unhandled exceptions.
-      // The stream's onError callback is already handling the connection failure and scheduling reconnects.
-      _channel!.ready.then((_) {
-        _log.d('[WS] Connection successfully established (ready completed)');
-      }).catchError((e) {
-        _log.w('[WS] Connection ready future failed (handled): $e');
-      });
+      final dartWebSocket = await WebSocket.connect(
+        wsUri.toString(),
+        customClient: httpClient,
+      );
+
+      _channel = IOWebSocketChannel(dartWebSocket);
+      _log.d('[WS] Connection successfully established (ready completed)');
 
       _subscription = _channel!.stream.listen(
         (raw) => _handleRawMessage(systemId, raw as String),

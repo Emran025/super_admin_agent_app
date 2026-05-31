@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:super_admin_agent/domain/otp_gateway/repositories/otp_gateway_repository.dart';
 
@@ -21,7 +22,7 @@ class OtpGatewayWsHandler implements CapabilityCommandHandler {
     required String systemId,
     Map<String, dynamic>? payload,
   }) async {
-    print('🐛 [OTP] OtpGatewayWsHandler.handle received command: $commandId');
+    debugPrint('🐛 [OTP] OtpGatewayWsHandler.handle received command: $commandId');
     final messageBody = payload?['message_body'] as String?;
     if (messageBody != null && messageBody.isNotEmpty) {
       _getIt<OtpGatewayRepository>().cacheMessageBody(commandId, messageBody);

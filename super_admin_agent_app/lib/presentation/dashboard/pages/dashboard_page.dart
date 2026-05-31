@@ -56,6 +56,7 @@ class _DashboardPageState extends State<DashboardPage> {
       if (mounted) {
         await _checkDefaultSmsApp();
         if (result == 'granted') {
+          // ignore: use_build_context_synchronously
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('✅ تم تعيين التطبيق كتطبيق الرسائل الافتراضي'),
@@ -326,11 +327,11 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 20),
-              const SizedBox(width: 8),
-              const Expanded(
+               Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 20),
+               SizedBox(width: 8),
+               Expanded(
                 child: Text(
                   'التطبيق ليس تطبيق الرسائل الافتراضي',
                   style: TextStyle(
