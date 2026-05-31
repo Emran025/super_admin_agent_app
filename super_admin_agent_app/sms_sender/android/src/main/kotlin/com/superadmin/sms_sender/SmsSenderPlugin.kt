@@ -98,13 +98,26 @@ class SmsSenderPlugin : FlutterPlugin, MethodCallHandler {
                     val sm = context.getSystemService(SubscriptionManager::class.java)
                     val active = sm?.activeSubscriptionInfoList
                     if (!active.isNullOrEmpty() && active.size == 1) {
-                        val subId = active[0].subscriptionId
-                        android.util.Log.d(TAG, "Single SIM detected (subId=$subId). Routing to it.")
-                        return smsManagerForSub(defaultManager, subId)
+                        val info = active[0]
+                        // Check that the subscription is not purely data-based or that it can send SMS messages
+                        val supportsSms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val tm = context.getSystemService(TelephonyManager::class.java)
+                                .createForSubscriptionId(info.subscriptionId)
+                            tm.canSendMessage()  // API 31+
+                        } else {
+                            // Before Android 12: Make sure the type is not data only (2)
+                            info.subscriptionType != SubscriptionManager.SUBSCRIPTION_TYPE_DATA
+                        }
+
+                        if (supportsSms) {
+                            val subId = info.subscriptionId
+                            android.util.Log.d(TAG, "Single SMS-capable SIM (subId=$subId). Routing to it.")
+                            return smsManagerForSub(defaultManager, subId)
+                        } else {
+                            android.util.Log.w(TAG, "Single SIM (subId=${info.subscriptionId}) does not support SMS – falling back to default.")
+                        }
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Error resolving single-SIM fallback: ${e.message}", e)
-                }
+                } catch (e: Exception) { ... }
             }
             return defaultManager
         }
