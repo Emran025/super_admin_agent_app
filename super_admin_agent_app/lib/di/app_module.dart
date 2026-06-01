@@ -30,6 +30,16 @@ import '../presentation/dashboard/cubit/linked_systems_cubit.dart';
 import '../presentation/otp_gateway/cubit/otp_dispatch_cubit.dart';
 import '../presentation/pairing/cubit/pairing_cubit.dart';
 import '../presentation/payment_observation/cubit/payment_observation_cubit.dart';
+import '../presentation/chats/cubit/conversations_cubit.dart';
+import '../presentation/chats/cubit/thread_cubit.dart';
+import '../domain/user_messaging/entities/sms_conversation.dart';
+import '../domain/user_messaging/repositories/user_messaging_repository.dart';
+import '../domain/user_messaging/use_cases/get_thread_messages_use_case.dart';
+import '../domain/user_messaging/use_cases/list_sms_conversations_use_case.dart';
+import '../domain/user_messaging/use_cases/mark_thread_read_use_case.dart';
+import '../domain/user_messaging/use_cases/retry_user_sms_use_case.dart';
+import '../domain/user_messaging/use_cases/send_user_sms_use_case.dart';
+import '../data/user_messaging/repositories/telephony_user_messaging_repository_impl.dart';
 import '../shared/data/canonical_json.dart';
 import '../shared/data/crypto_nonce_generator.dart';
 import '../shared/data/http_client_factory.dart';
@@ -284,6 +294,38 @@ Future<void> setupDependencies() async {
       matchUseCase: getIt<MatchObservationToIntentUseCase>(),
       reportUseCase: getIt<ReportObservationUseCase>(),
       smsReceiver: SmsReceiverService.instance,
+    ),
+  );
+
+  // 15. User messaging (compensating Chats UI — isolated from agent domains).
+  getIt.registerLazySingleton<UserMessagingRepository>(
+    () => const TelephonyUserMessagingRepositoryImpl(),
+  );
+  getIt.registerLazySingleton<ListSmsConversationsUseCase>(
+    () => ListSmsConversationsUseCase(repository: getIt<UserMessagingRepository>()),
+  );
+  getIt.registerLazySingleton<GetThreadMessagesUseCase>(
+    () => GetThreadMessagesUseCase(repository: getIt<UserMessagingRepository>()),
+  );
+  getIt.registerLazySingleton<SendUserSmsUseCase>(
+    () => SendUserSmsUseCase(repository: getIt<UserMessagingRepository>()),
+  );
+  getIt.registerLazySingleton<RetryUserSmsUseCase>(
+    () => RetryUserSmsUseCase(repository: getIt<UserMessagingRepository>()),
+  );
+  getIt.registerLazySingleton<MarkThreadReadUseCase>(
+    () => MarkThreadReadUseCase(repository: getIt<UserMessagingRepository>()),
+  );
+  getIt.registerFactory<ConversationsCubit>(
+    () => ConversationsCubit(listUseCase: getIt<ListSmsConversationsUseCase>()),
+  );
+  getIt.registerFactoryParam<ThreadCubit, SmsConversation, void>(
+    (conversation, _) => ThreadCubit(
+      conversation: conversation,
+      getMessagesUseCase: getIt<GetThreadMessagesUseCase>(),
+      sendUseCase: getIt<SendUserSmsUseCase>(),
+      retryUseCase: getIt<RetryUserSmsUseCase>(),
+      markReadUseCase: getIt<MarkThreadReadUseCase>(),
     ),
   );
 }

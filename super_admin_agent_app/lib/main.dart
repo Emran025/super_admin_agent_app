@@ -7,7 +7,7 @@ import 'di/app_module.dart';
 import 'presentation/auth_2fa/cubit/auth_challenge_cubit.dart';
 import 'presentation/auth_2fa/widgets/challenge_approval_dialog.dart';
 import 'presentation/dashboard/cubit/linked_systems_cubit.dart';
-import 'presentation/dashboard/pages/dashboard_page.dart';
+import 'presentation/shell/agent_shell_page.dart';
 import 'presentation/pairing/cubit/pairing_cubit.dart';
 import 'presentation/pairing/pages/link_system_page.dart';
 import 'presentation/pairing/pages/pairing_page.dart';
@@ -181,7 +181,7 @@ class SuperAdminAgentApp extends StatelessWidget {
                 BlocProvider(create: (_) => getIt<PairingCubit>()),
                 BlocProvider(create: (_) => getIt<LinkedSystemsCubit>()),
               ],
-              child: const DashboardPage(),
+              child: const AgentShellPage(),
             ),
         '/link-system': (_) => BlocProvider(
               create: (_) => getIt<LinkedSystemsCubit>(),
@@ -205,7 +205,7 @@ class SuperAdminAgentApp extends StatelessWidget {
         BlocProvider(create: (_) => getIt<PairingCubit>()),
         BlocProvider(create: (_) => getIt<LinkedSystemsCubit>()),
       ],
-      child: const DashboardPage(),
+      child: const AgentShellPage(),
     );
   }
 }
